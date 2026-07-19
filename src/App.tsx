@@ -1,0 +1,189 @@
+import { useState, useEffect } from 'react';
+import { BookRecord, ActiveTab } from './types';
+import { loadBooksFromStorage, saveBooksToStorage, safeStorage } from './utils/helpers';
+import PassbookHeader from './components/PassbookHeader';
+import BookDepositForm from './components/BookDepositForm';
+import PassbookLedger from './components/PassbookLedger';
+import CelebrationModal from './components/CelebrationModal';
+import CuteModal from './components/CuteModal';
+import { Sparkles, Star, Heart } from 'lucide-react';
+import confetti from 'canvas-confetti';
+
+export default function App() {
+  // Reading records states
+  const [books, setBooks] = useState<BookRecord[]>([]);
+  const [ownerName, setOwnerName] = useState<string>('이가연');
+  const [ownerTitle, setOwnerTitle] = useState<string>('반짝반짝');
+  const [activeTab, setActiveTab] = useState<ActiveTab>('deposit');
+
+  // Milestone Celebration States
+  const [showCelebration, setShowCelebration] = useState(false);
+  const [celebrationBookCount, setCelebrationBookCount] = useState(0);
+
+  // Custom alert states
+  const [alertConfig, setAlertConfig] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    type: 'success' | 'warning' | 'info';
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    type: 'info'
+  });
+
+  // Load books & owner name from storage on mount
+  useEffect(() => {
+    const loadedBooks = loadBooksFromStorage();
+    setBooks(loadedBooks);
+
+    const storedName = safeStorage.getItem('digital_reading_owner_name');
+    const storedTitle = safeStorage.getItem('digital_reading_owner_title');
+    if (storedName) {
+      setOwnerName(storedName);
+    }
+    if (storedTitle) {
+      setOwnerTitle(storedTitle);
+    }
+  }, []);
+
+  // Sync owner info to storage
+  const handleUpdateOwnerInfo = (name: string, title: string) => {
+    setOwnerName(name);
+    setOwnerTitle(title);
+    safeStorage.setItem('digital_reading_owner_name', name);
+    safeStorage.setItem('digital_reading_owner_title', title);
+  };
+
+
+
+  // Trigger alert helper instead of default browser alert
+  const showCustomAlert = (title: string, message: string, type: 'success' | 'warning' | 'info' = 'info') => {
+    setAlertConfig({
+      isOpen: true,
+      title,
+      message,
+      type
+    });
+  };
+
+  // Add new book to ledger
+  const handleAddBook = (newBook: BookRecord) => {
+    const updatedBooks = [...books, newBook];
+    setBooks(updatedBooks);
+    saveBooksToStorage(updatedBooks);
+
+    // Direct transition to ledger view
+    setActiveTab('ledger');
+
+    // Trigger Success alert
+    showCustomAlert('참 잘했어요!', `와아! [${newBook.title}] 책 저축에 성공했어요!`, 'success');
+
+    // Mega Confetti & Certificate Milestone logic
+    const oldMilestoneCount = Math.floor(books.length / 10);
+    const newMilestoneCount = Math.floor(updatedBooks.length / 10);
+
+    // Trigger celebration when count hits a new multiple of 10 (e.g. 10, 20, 30...)
+    if (newMilestoneCount > oldMilestoneCount && updatedBooks.length % 10 === 0) {
+      const targetCount = updatedBooks.length;
+      setCelebrationBookCount(targetCount);
+
+      // Trigger Mega Confetti explosion!
+      setTimeout(() => {
+        const duration = 4 * 1000;
+        const animationEnd = Date.now() + duration;
+        const defaults = { startVelocity: 30, spread: 360, ticks: 60, zIndex: 100 };
+
+        const randomInRange = (min: number, max: number) => {
+          return Math.random() * (max - min) + min;
+        };
+
+        const interval: NodeJS.Timeout = setInterval(() => {
+          const timeLeft = animationEnd - Date.now();
+
+          if (timeLeft <= 0) {
+            return clearInterval(interval);
+          }
+
+          const particleCount = 50 * (timeLeft / duration);
+          // since particles fall down, animate them slightly higher than random
+          confetti({ ...defaults, particleCount, origin: { x: randomInRange(0.1, 0.3), y: Math.random() - 0.2 } });
+          confetti({ ...defaults, particleCount, origin: { x: randomInRange(0.7, 0.9), y: Math.random() - 0.2 } });
+        }, 250);
+
+        // Open certificate modal
+        setShowCelebration(true);
+      }, 800);
+    }
+  };
+
+  // Delete individual book
+  const handleDeleteBook = (id: string) => {
+    const updatedBooks = books.filter((b) => b.id !== id);
+    setBooks(updatedBooks);
+    saveBooksToStorage(updatedBooks);
+    showCustomAlert('삭제 완료', '기록을 통장에서 안전하게 지웠어요.', 'info');
+  };
+
+  // Clear all book records
+  const handleClearAll = () => {
+    setBooks([]);
+    saveBooksToStorage([]);
+    showCustomAlert('초기화 완료', '독서 통장이 새 주인을 기다려요! 기록이 모두 비워졌습니다.', 'warning');
+  };
+
+  return (
+    <div className="min-h-screen dot-pattern py-8 px-4 sm:px-6 lg:px-8">
+      <div className="max-w-4xl mx-auto">
+        {/* Passbook Header and Tab switcher */}
+        <PassbookHeader
+          bookCount={books.length}
+          ownerName={ownerName}
+          ownerTitle={ownerTitle}
+          onUpdateOwnerInfo={handleUpdateOwnerInfo}
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+        />
+
+        {/* Tab Content with animations */}
+        <main className="pb-12">
+          {activeTab === 'deposit' ? (
+            <BookDepositForm onAddBook={handleAddBook} />
+          ) : (
+            <PassbookLedger
+              books={books}
+              onDeleteBook={handleDeleteBook}
+              onClearAll={handleClearAll}
+            />
+          )}
+        </main>
+
+        {/* Cute footer design constraint mapping */}
+        <footer className="text-center font-gaegu text-xl text-[#A19582] py-6 border-t border-dashed border-[#E6D5B8]">
+          <p className="flex items-center justify-center gap-1.5 font-bold">
+            생각이 자라나는 사랑 가득 <span><Heart size={16} className="text-[#FF8B3D] fill-current" /></span> 디지털 독서통장
+          </p>
+        </footer>
+      </div>
+
+      {/* 10-Book Milestone Certificate celebration Modal */}
+      <CelebrationModal
+        isOpen={showCelebration}
+        onClose={() => setShowCelebration(false)}
+        ownerName={`${ownerName} (${ownerTitle})`}
+        bookCount={celebrationBookCount}
+      />
+
+      {/* Reusable Cute Custom Modal for General Alert/Message */}
+      <CuteModal
+        isOpen={alertConfig.isOpen}
+        onClose={() => setAlertConfig((prev) => ({ ...prev, isOpen: false }))}
+        title={alertConfig.title}
+        type={alertConfig.type}
+      >
+        {alertConfig.message}
+      </CuteModal>
+    </div>
+  );
+}

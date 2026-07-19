@@ -1,0 +1,69 @@
+@import url('https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=Noto+Sans+KR:wght@400;500;700;900&family=Gaegu:wght@400;700&display=swap');
+@import "tailwindcss";
+
+@font-face {
+    font-family: 'KCC-Dandanche';
+    src: url('https://fastly.jsdelivr.net/gh/projectnoonnu/noonfonts_2202@1.0/KCC-Dandanche.woff') format('woff');
+    font-weight: normal;
+    font-style: normal;
+}
+
+@font-face {
+    font-family: 'Typo_Myeongtamjeong';
+    src: url('https://fastly.jsdelivr.net/gh/projectnoonnu/noonfonts_2310@1.0/Typo_Myeongtamjeong.woff') format('woff'),
+         url('https://fastly.jsdelivr.net/gh/projectnoonnu/noonfonts_2202@1.0/Typo_Myeongtamjeong.woff') format('woff');
+    font-weight: normal;
+    font-style: normal;
+}
+
+@theme {
+  --font-sans: "Noto Sans KR", "Inter", sans-serif;
+  --font-gaegu: "Typo_Myeongtamjeong", "타이포 명탐정M", "타이포 명탐정", "KCC-Dandanche", "Gaegu", cursive, sans-serif;
+  --font-gothic: "Black Han Sans", "Noto Sans KR", sans-serif;
+  --color-natural-bg: #FDFCF0;
+  --color-natural-text: #4A4439;
+  --color-natural-border: #E6D5B8;
+  --color-natural-green: #6BCB77;
+  --color-natural-mint: #A8D5BA;
+  --color-natural-yellow: #FFF9C4;
+  --color-natural-orange: #FF8B3D;
+  --color-natural-muted: #A19582;
+}
+
+body {
+  font-family: var(--font-sans);
+  background-color: #FDFCF0;
+  color: #4A4439;
+}
+
+/* Natural moss and sand dot pattern */
+.dot-pattern {
+  background-color: #FDFCF0;
+  background-image: radial-gradient(#E6D5B8 1.5px, transparent 1.5px), radial-gradient(#A8D5BA 1.5px, transparent 1.5px);
+  background-size: 24px 24px;
+  background-position: 0 0, 12px 12px;
+}
+
+/* Notebook paper effect */
+.notebook-lines {
+  background-image: linear-gradient(#E6D5B8 1px, transparent 1px);
+  background-size: 100% 2.2rem;
+  background-position-y: 0.5rem;
+}
+
+/* Custom scrollbar for organic look */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #FDFCF0;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb {
+  background: #E6D5B8;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #A8D5BA;
+}
