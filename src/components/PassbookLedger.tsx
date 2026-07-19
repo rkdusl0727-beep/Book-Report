@@ -9,12 +9,12 @@ const getFeelingIcon = (feelingText: string) => {
   const clean = feelingText.replace(/[\u2700-\u27BF]|[\uE000-\uF8FF]|\uD83C[\uDC00-\uDFFF]|\uD83D[\uDC00-\uDFFF]|[\u2011-\u26FF]|\uD83E[\uDC00-\uDFFF]/g, '').trim();
   
   if (clean.includes('감동')) {
-    return <Heart size={18} className="text-rose-500 fill-rose-200 inline-block mr-1 align-middle" />;
+    return <Heart size={18} className="text-rose-500 fill-rose-200 shrink-0" />;
   }
   if (clean.includes('또')) {
-    return <Sparkles size={18} className="text-[#4E9F57] fill-emerald-100 inline-block mr-1 align-middle" />;
+    return <Sparkles size={18} className="text-[#4E9F57] fill-emerald-100 shrink-0" />;
   }
-  return <Smile size={18} className="text-amber-500 fill-amber-100 inline-block mr-1 align-middle" />;
+  return <Smile size={18} className="text-amber-500 fill-amber-100 shrink-0" />;
 };
 
 const getFeelingTextOnly = (feelingText: string) => {
@@ -150,8 +150,8 @@ export default function PassbookLedger({ books, onDeleteBook, onClearAll }: Pass
                   <div className="flex md:flex-col items-center justify-between md:justify-center md:items-center gap-2 shrink-0 md:w-28 text-center pb-3 md:pb-0 border-b md:border-b-0 md:border-r border-dashed border-[#E6D5B8]">
                     <div className="flex items-center md:flex-col gap-2">
                       <div className={`w-14 h-14 rounded-full border-4 border-dashed flex flex-col items-center justify-center font-gaegu font-extrabold ${stampStyle} shadow-sm transform -rotate-6`}>
-                        <span className="text-xs">참잘했어요</span>
-                        <span className="text-sm leading-none">{books.length - idx}번</span>
+                        <span className="text-xs">참잘</span>
+                        <span className="text-xs leading-none">했어요</span>
                       </div>
                       <div className="text-left md:text-center mt-1">
                         <span className="font-gaegu text-lg font-bold text-[#6BCB77] block">독서도장 쿵!</span>
@@ -271,15 +271,15 @@ export default function PassbookLedger({ books, onDeleteBook, onClearAll }: Pass
 
                       {/* Notebook lined notes style block */}
                       <div className="notebook-lines min-h-[4rem] p-3.5 bg-[#FDFCF0]/50 border border-[#E6D5B8] rounded-xl relative">
-                        <p className="font-sans text-[#4A4439] text-sm leading-8 flex items-center gap-2">
-                          <span className="px-2 py-0.5 rounded-lg bg-[#E8F5E9] text-[#4E9F57] font-gaegu text-base font-bold shrink-0">
+                        <div className="flex items-center gap-2.5 flex-wrap min-h-[2.5rem]">
+                          <span className="px-2.5 py-1 rounded-lg bg-[#E8F5E9] text-[#4E9F57] font-gaegu text-lg font-bold shrink-0">
                             내 기분
                           </span>
-                          <span className="font-bold flex items-center gap-1 text-base text-[#4A4439]">
+                          <span className="font-gaegu text-xl font-bold flex items-center gap-1.5 text-[#4A4439]">
                             {getFeelingIcon(book.feeling)}
-                            {getFeelingTextOnly(book.feeling)}
+                            <span>{getFeelingTextOnly(book.feeling)}</span>
                           </span>
-                        </p>
+                        </div>
                         
                         {/* Voice recorded playback if available */}
                         {book.voiceRecord && (

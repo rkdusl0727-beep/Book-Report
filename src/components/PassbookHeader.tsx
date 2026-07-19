@@ -202,15 +202,18 @@ export default function PassbookHeader({
               )}
             </div>
             
-            <p className="font-sans text-xs text-[#A19582] mt-1 flex items-center gap-1.5 flex-wrap">
-              <span className="font-bold text-[#4E9F57] bg-[#E8F5E9] px-2 py-0.5 rounded-lg flex items-center gap-1">
-                <Sprout size={13} className="text-[#6BCB77] inline shrink-0" />
-                {gradeInfo.title}
-              </span>
-              <span className="text-stone-300">|</span>
-              <span className="inline-block px-1.5 py-0.5 bg-[#FFF3E0] text-[#FF8B3D] font-gaegu font-bold text-xs rounded-md">TIP 💡</span>
-              <span>나만의 귀여운 독서통장 이름을 지어주세요</span>
-            </p>
+            <div className="mt-1 space-y-1">
+              <div className="flex items-center">
+                <span className="font-bold text-[#4E9F57] bg-[#E8F5E9] px-2 py-0.5 rounded-lg flex items-center gap-1 text-[11px] sm:text-xs">
+                  <Sprout size={13} className="text-[#6BCB77] inline shrink-0" />
+                  {gradeInfo.title}
+                </span>
+              </div>
+              <p className="font-sans text-[11px] sm:text-xs text-[#A19582] flex items-center gap-1.5 whitespace-nowrap overflow-x-auto scrollbar-none">
+                <span className="inline-block px-1.5 py-0.5 bg-[#FFF3E0] text-[#FF8B3D] font-gaegu font-bold text-xs rounded-md shrink-0">TIP 💡</span>
+                <span className="truncate">나만의 귀여운 독서통장 이름을 지어주세요</span>
+              </p>
+            </div>
           </div>
         </div>
 
@@ -252,31 +255,31 @@ export default function PassbookHeader({
         <button
           onClick={() => setActiveTab('deposit')}
           id="tab-deposit-btn"
-          className={`flex-1 py-3 sm:py-4.5 flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2 font-gaegu text-xl sm:text-2xl font-bold border-r-2 border-[#E6D5B8] transition-all duration-300 cursor-pointer ${
+          className={`flex-1 py-3.5 sm:py-5 flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2 font-gaegu text-xl sm:text-2xl font-bold border-r-2 border-[#E6D5B8] transition-all duration-300 cursor-pointer ${
             activeTab === 'deposit'
               ? 'bg-[#E8F5E9] text-[#4E9F57] shadow-inner font-extrabold'
               : 'bg-white text-[#A19582] hover:text-[#5D5443] hover:bg-[#FDFCF0]'
           }`}
         >
-          <BookOpen size={20} className={`shrink-0 sm:w-[24px] sm:h-[24px] ${activeTab === 'deposit' ? 'text-[#4E9F57] scale-110' : ''}`} />
+          <BookOpen size={22} className={`shrink-0 sm:w-[28px] sm:h-[28px] ${activeTab === 'deposit' ? 'text-[#4E9F57] scale-110' : ''}`} />
           <div className="flex flex-col items-center text-center sm:flex-row sm:gap-1 font-bold">
-            <span className="whitespace-nowrap text-[14px] min-[360px]:text-[15px] sm:text-2xl font-extrabold">차곡차곡</span>
-            <span className="whitespace-nowrap text-[14px] min-[360px]:text-[15px] sm:text-2xl font-extrabold">책 저축하기</span>
+            <span className="whitespace-nowrap text-[16px] min-[360px]:text-[17px] sm:text-3xl font-black">차곡차곡</span>
+            <span className="whitespace-nowrap text-[16px] min-[360px]:text-[17px] sm:text-3xl font-black">책 저축하기</span>
           </div>
         </button>
         <button
           onClick={() => setActiveTab('ledger')}
           id="tab-ledger-btn"
-          className={`flex-1 py-3 sm:py-4.5 flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2 font-gaegu text-xl sm:text-2xl font-bold transition-all duration-300 cursor-pointer ${
+          className={`flex-1 py-3.5 sm:py-5 flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2 font-gaegu text-xl sm:text-2xl font-bold transition-all duration-300 cursor-pointer ${
             activeTab === 'ledger'
               ? 'bg-[#FFF3E0] text-[#FF8B3D] shadow-inner font-extrabold'
               : 'bg-white text-[#A19582] hover:text-[#5D5443] hover:bg-[#FDFCF0]'
           }`}
         >
-          <PiggyBank size={20} className={`shrink-0 sm:w-[24px] sm:h-[24px] ${activeTab === 'ledger' ? 'text-[#FF8B3D] scale-110' : ''}`} />
+          <PiggyBank size={22} className={`shrink-0 sm:w-[28px] sm:h-[28px] ${activeTab === 'ledger' ? 'text-[#FF8B3D] scale-110' : ''}`} />
           <div className="flex flex-col items-center text-center sm:flex-row sm:gap-1 font-bold">
-            <span className="whitespace-nowrap text-[14px] min-[360px]:text-[15px] sm:text-2xl font-extrabold">내 통장</span>
-            <span className="whitespace-nowrap text-[14px] min-[360px]:text-[15px] sm:text-2xl font-extrabold">보기</span>
+            <span className="whitespace-nowrap text-[16px] min-[360px]:text-[17px] sm:text-3xl font-black">내 통장</span>
+            <span className="whitespace-nowrap text-[16px] min-[360px]:text-[17px] sm:text-3xl font-black">보기</span>
           </div>
         </button>
       </div>
