@@ -259,9 +259,10 @@ export default function PassbookHeader({
           }`}
         >
           <BookOpen size={20} className={`shrink-0 sm:w-[24px] sm:h-[24px] ${activeTab === 'deposit' ? 'text-[#4E9F57] scale-110' : ''}`} />
-          <span className="whitespace-nowrap text-[13px] min-[360px]:text-[14px] sm:text-2xl">
-            차곡차곡 책 저축하기
-          </span>
+          <div className="flex flex-col items-center text-center sm:flex-row sm:gap-1 font-bold">
+            <span className="whitespace-nowrap text-[14px] min-[360px]:text-[15px] sm:text-2xl font-extrabold">차곡차곡</span>
+            <span className="whitespace-nowrap text-[14px] min-[360px]:text-[15px] sm:text-2xl font-extrabold">책 저축하기</span>
+          </div>
         </button>
         <button
           onClick={() => setActiveTab('ledger')}
@@ -273,9 +274,9 @@ export default function PassbookHeader({
           }`}
         >
           <PiggyBank size={20} className={`shrink-0 sm:w-[24px] sm:h-[24px] ${activeTab === 'ledger' ? 'text-[#FF8B3D] scale-110' : ''}`} />
-          <div className="flex flex-col items-center text-center sm:flex-row sm:gap-1">
-            <span className="whitespace-nowrap text-[13px] min-[360px]:text-[14px] sm:text-2xl">내 통장</span>
-            <span className="whitespace-nowrap text-[13px] min-[360px]:text-[14px] sm:text-2xl">보기</span>
+          <div className="flex flex-col items-center text-center sm:flex-row sm:gap-1 font-bold">
+            <span className="whitespace-nowrap text-[14px] min-[360px]:text-[15px] sm:text-2xl font-extrabold">내 통장</span>
+            <span className="whitespace-nowrap text-[14px] min-[360px]:text-[15px] sm:text-2xl font-extrabold">보기</span>
           </div>
         </button>
       </div>

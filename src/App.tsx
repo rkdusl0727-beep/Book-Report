@@ -161,10 +161,13 @@ export default function App() {
 
         {/* Cute footer design constraint mapping */}
         <footer className="text-center font-gaegu text-[#A19582] py-6 border-t border-dashed border-[#E6D5B8]">
-          <p className="flex items-center justify-center gap-2 font-bold text-base min-[360px]:text-lg sm:text-xl md:text-2xl whitespace-nowrap">
-            <Heart className="text-[#FF8B3D] fill-current shrink-0 w-5 h-5 sm:w-6 sm:h-6" />
-            <span>생각이 자라나는 사랑 가득 디지털 독서통장</span>
-          </p>
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-1.5 sm:gap-2 font-bold text-base min-[360px]:text-lg sm:text-xl md:text-2xl">
+            <div className="flex items-center justify-center gap-1.5 whitespace-nowrap">
+              <Heart className="text-[#FF8B3D] fill-current shrink-0 w-5 h-5 sm:w-6 sm:h-6" />
+              <span>생각이 자라나는 사랑 가득</span>
+            </div>
+            <span className="whitespace-nowrap">디지털 독서통장</span>
+          </div>
         </footer>
       </div>
 

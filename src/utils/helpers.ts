@@ -6,8 +6,12 @@ const memoryStorageDict: Record<string, string> = {};
 export const safeStorage = {
   getItem: (key: string): string | null => {
     try {
-      if (typeof window !== 'undefined' && window.localStorage) {
-        return localStorage.getItem(key);
+      if (typeof window !== 'undefined') {
+        // Wrapping access inside try-catch to block sandbox SecurityErrors
+        const storage = window.localStorage;
+        if (storage) {
+          return storage.getItem(key);
+        }
       }
     } catch (e) {
       console.warn(`[Storage Defense] localStorage.getItem failed for key "${key}". Using memory fallback.`, e);
@@ -19,9 +23,13 @@ export const safeStorage = {
     // Sync to memory dictionary first to ensure it's always available
     memoryStorageDict[key] = value;
     try {
-      if (typeof window !== 'undefined' && window.localStorage) {
-        localStorage.setItem(key, value);
-        return true;
+      if (typeof window !== 'undefined') {
+        // Wrapping access inside try-catch to block sandbox SecurityErrors
+        const storage = window.localStorage;
+        if (storage) {
+          storage.setItem(key, value);
+          return true;
+        }
       }
     } catch (e) {
       console.warn(`[Storage Defense] localStorage.setItem failed for key "${key}". Saved to memory instead.`, e);
@@ -32,9 +40,13 @@ export const safeStorage = {
   removeItem: (key: string): boolean => {
     delete memoryStorageDict[key];
     try {
-      if (typeof window !== 'undefined' && window.localStorage) {
-        localStorage.removeItem(key);
-        return true;
+      if (typeof window !== 'undefined') {
+        // Wrapping access inside try-catch to block sandbox SecurityErrors
+        const storage = window.localStorage;
+        if (storage) {
+          storage.removeItem(key);
+          return true;
+        }
       }
     } catch (e) {
       console.warn(`[Storage Defense] localStorage.removeItem failed for key "${key}". Removed from memory.`, e);

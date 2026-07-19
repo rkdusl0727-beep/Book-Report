@@ -409,7 +409,7 @@ export default function BookDepositForm({ onAddBook }: BookDepositFormProps) {
 
         {/* Question 4: 내 목소리로 소감 남기기 */}
         <div className="space-y-3">
-          <label className="block font-gaegu text-2xl font-bold text-[#4A4439]">
+          <label className="block font-gaegu text-[20px] min-[360px]:text-2xl font-bold text-[#4A4439] whitespace-nowrap overflow-hidden text-ellipsis">
             4. 내 목소리로 소감 남기기
           </label>
           <div className="p-5 bg-[#FDFCF0]/30 rounded-2xl border-2 border-[#E6D5B8] flex flex-col sm:flex-row items-center justify-between gap-4">
@@ -479,8 +479,8 @@ export default function BookDepositForm({ onAddBook }: BookDepositFormProps) {
 
         {/* Question 5: 기억에 남는 장면이 있나요? */}
         <div className="space-y-3">
-          <label className="block font-gaegu text-2xl font-bold text-[#4A4439]">
-            5. 기억에 남는 장면이 있나요?
+          <label className="block font-gaegu text-2xl font-bold text-[#4A4439] leading-tight">
+            5. 기억에 남는 장면이 <br className="sm:hidden" /> 있나요?
           </label>
           <div className="flex flex-col items-center justify-center gap-5 w-full text-center">
             {/* Scene Image Card container */}
