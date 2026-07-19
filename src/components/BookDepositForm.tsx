@@ -330,25 +330,27 @@ export default function BookDepositForm({ onAddBook }: BookDepositFormProps) {
           <label className="block font-gaegu text-2xl font-bold text-[#4A4439]">
             2. 별점을 주세요!
           </label>
-          <div className="flex items-center gap-2">
-            {[1, 2, 3, 4, 5].map((score) => (
-              <button
-                key={score}
-                type="button"
-                onClick={() => handleStarClick(score)}
-                onMouseEnter={() => setHoverRating(score)}
-                onMouseLeave={() => setHoverRating(null)}
-                className="p-1 text-stone-200 hover:scale-110 active:scale-95 transition-all cursor-pointer"
-              >
-                <Star
-                  size={44}
-                  fill={score <= (hoverRating ?? rating) ? '#FFD93D' : 'none'}
-                  stroke={score <= (hoverRating ?? rating) ? '#FF8B3D' : '#E6D5B8'}
-                  strokeWidth={2}
-                />
-              </button>
-            ))}
-            <span className="font-gaegu text-2xl font-bold text-[#FF8B3D] ml-2">
+          <div className="flex flex-col items-start gap-2">
+            <div className="flex items-center gap-1 sm:gap-2">
+              {[1, 2, 3, 4, 5].map((score) => (
+                <button
+                  key={score}
+                  type="button"
+                  onClick={() => handleStarClick(score)}
+                  onMouseEnter={() => setHoverRating(score)}
+                  onMouseLeave={() => setHoverRating(null)}
+                  className="p-1 text-stone-200 hover:scale-110 active:scale-95 transition-all cursor-pointer"
+                >
+                  <Star
+                    size={40}
+                    fill={score <= (hoverRating ?? rating) ? '#FFD93D' : 'none'}
+                    stroke={score <= (hoverRating ?? rating) ? '#FF8B3D' : '#E6D5B8'}
+                    strokeWidth={2}
+                  />
+                </button>
+              ))}
+            </div>
+            <span className="font-gaegu text-2xl font-bold text-[#FF8B3D] pl-1 whitespace-nowrap min-h-[36px] flex items-center">
               {rating === 5 ? '정말 최고예요!' : rating === 4 ? '재미있어요!' : rating === 3 ? '보통이에요!' : rating === 2 ? '조금 아쉬워요' : '내 스타일이 아니에요'}
             </span>
           </div>
@@ -407,21 +409,21 @@ export default function BookDepositForm({ onAddBook }: BookDepositFormProps) {
 
         {/* Question 4: 내 목소리로 소감 남기기 */}
         <div className="space-y-3">
-          <label className="block font-gaegu text-2xl font-bold text-[#4A4439] flex items-center gap-1.5">
-            <Mic size={24} className="text-[#6BCB77]" /> 4. 내 목소리로 소감 남기기
+          <label className="block font-gaegu text-2xl font-bold text-[#4A4439]">
+            4. 내 목소리로 소감 남기기
           </label>
           <div className="p-5 bg-[#FDFCF0]/30 rounded-2xl border-2 border-[#E6D5B8] flex flex-col sm:flex-row items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <div className={`w-12 h-12 rounded-full ${isRecording ? 'bg-rose-500 animate-ping' : 'bg-[#A8D5BA]/30'} flex items-center justify-center text-[#4E9F57] shrink-0`}>
+            <div className="flex flex-col sm:flex-row items-center sm:items-start gap-3 w-full text-center sm:text-left">
+              <div className={`w-12 h-12 rounded-full ${isRecording ? 'bg-rose-500 animate-ping' : 'bg-[#A8D5BA]/30'} flex items-center justify-center text-[#4E9F57] shrink-0 mx-auto sm:mx-0`}>
                 <Mic size={24} className={isRecording ? 'text-white' : 'text-[#4E9F57]'} />
               </div>
-              <div>
+              <div className="flex-1 w-full">
                 <h4 className="font-gaegu text-xl font-bold text-[#4A4439]">책을 읽은 느낌 말하기</h4>
                 <p className="text-xs text-[#A19582] font-sans leading-relaxed">
                   녹음시간 (최대 20초)
                 </p>
-                <div className="mt-2 bg-white/60 border border-dashed border-[#E6D5B8] p-2.5 rounded-xl text-[11px] text-stone-600 font-sans space-y-1">
-                  <p className="font-bold text-[#6BCB77] mb-1 flex items-center gap-1">
+                <div className="mt-2 bg-white/60 border border-dashed border-[#E6D5B8] p-2.5 rounded-xl text-[11px] text-stone-600 font-sans space-y-1 text-left">
+                  <p className="font-bold text-[#6BCB77] mb-1 flex items-center gap-1 justify-center sm:justify-start">
                     <Sparkles size={12} className="text-[#FF8B3D]" /> 느낌 말하기 예시
                   </p>
                   <p className="text-stone-700 leading-normal">• "아기 돼지 삼형제가 지혜롭게 늑대를 물리쳐서 정말 흥미진진했어요!"</p>
@@ -477,8 +479,8 @@ export default function BookDepositForm({ onAddBook }: BookDepositFormProps) {
 
         {/* Question 5: 기억에 남는 장면이 있나요? */}
         <div className="space-y-3">
-          <label className="block font-gaegu text-2xl font-bold text-[#4A4439] flex items-center gap-1.5">
-            <ImageIcon size={24} className="text-[#A8D5BA]" /> 5. 기억에 남는 장면이 있나요?
+          <label className="block font-gaegu text-2xl font-bold text-[#4A4439]">
+            5. 기억에 남는 장면이 있나요?
           </label>
           <div className="flex flex-col items-center justify-center gap-5 w-full text-center">
             {/* Scene Image Card container */}
@@ -539,18 +541,6 @@ export default function BookDepositForm({ onAddBook }: BookDepositFormProps) {
                   <ImageIcon size={18} className="text-[#A19582]" />
                   <span>사진첩</span>
                 </button>
-
-                {/* Clear Button */}
-                {sceneImage && (
-                  <button
-                    type="button"
-                    onClick={() => setSceneImage(null)}
-                    className="px-4 py-2 bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-600 font-gaegu text-lg font-bold rounded-xl transition-colors cursor-pointer flex items-center justify-center gap-1 whitespace-nowrap"
-                  >
-                    <Trash2 size={16} />
-                    <span>지우기</span>
-                  </button>
-                )}
               </div>
 
               <p className="text-xs text-[#A19582] font-sans leading-relaxed max-w-md mx-auto">

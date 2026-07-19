@@ -122,22 +122,21 @@ export default function WhiteboardModal({
             img.src = initialImage;
             img.onload = () => {
               ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+              // Save initial state to history after image loads
+              const initialData = canvas.toDataURL('image/png');
+              historyRef.current = [initialData];
+              setHistory([...historyRef.current]);
             };
+          } else {
+            // Save initial white canvas state to history
+            const initialData = canvas.toDataURL('image/png');
+            historyRef.current = [initialData];
+            setHistory([...historyRef.current]);
           }
         }
-      }, 50); // slight delay to guarantee canvas element is mounted in DOM
+      }, 80); // slight delay to guarantee canvas element is mounted in DOM
     }
   }, [isOpen, initialImage]);
-
-  // Save state helper
-  const saveToHistory = () => {
-    const canvas = canvasRef.current;
-    if (canvas) {
-      const dataUrl = canvas.toDataURL('image/png');
-      historyRef.current.push(dataUrl);
-      setHistory([...historyRef.current]);
-    }
-  };
 
   // Unified Pointer Events Engine for iPad/Tablet touch pens, Apple Pencils, styluses, and mouse support
   useEffect(() => {
@@ -169,11 +168,6 @@ export default function WhiteboardModal({
 
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
-
-      // Save canvas state before drawing
-      const dataUrl = canvas.toDataURL('image/png');
-      historyRef.current.push(dataUrl);
-      setHistory([...historyRef.current]);
 
       ctx.beginPath();
       ctx.moveTo(coords.x, coords.y);
@@ -248,6 +242,11 @@ export default function WhiteboardModal({
         }
         isDrawingRef.current = false;
         setIsDrawing(false);
+
+        // Save current stroke-finished state to history
+        const dataUrl = canvas.toDataURL('image/png');
+        historyRef.current.push(dataUrl);
+        setHistory([...historyRef.current]);
       }
     };
 
@@ -266,9 +265,13 @@ export default function WhiteboardModal({
   }, [isOpen]);
 
   const handleUndo = () => {
-    if (historyRef.current.length === 0) return;
+    // Need at least 2 states in history to undo (initial state + at least one stroke)
+    if (historyRef.current.length <= 1) return;
 
-    const previousState = historyRef.current.pop();
+    // Remove the current active state (the last stroke we drew)
+    historyRef.current.pop();
+    // Retrieve the previous completed state
+    const previousState = historyRef.current[historyRef.current.length - 1];
     setHistory([...historyRef.current]);
 
     const canvas = canvasRef.current;
@@ -288,8 +291,11 @@ export default function WhiteboardModal({
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext('2d');
     if (canvas && ctx) {
-      saveToHistory();
       initCanvas(canvas, ctx);
+      // Reset history to only contain the cleared solid white state
+      const clearedData = canvas.toDataURL('image/png');
+      historyRef.current = [clearedData];
+      setHistory([...historyRef.current]);
     }
   };
 

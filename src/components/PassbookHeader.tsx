@@ -252,26 +252,31 @@ export default function PassbookHeader({
         <button
           onClick={() => setActiveTab('deposit')}
           id="tab-deposit-btn"
-          className={`flex-1 py-4.5 flex items-center justify-center gap-2 font-gaegu text-2xl font-bold border-r-2 border-[#E6D5B8] transition-all duration-300 cursor-pointer ${
+          className={`flex-1 py-3 sm:py-4.5 flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2 font-gaegu text-xl sm:text-2xl font-bold border-r-2 border-[#E6D5B8] transition-all duration-300 cursor-pointer ${
             activeTab === 'deposit'
               ? 'bg-[#E8F5E9] text-[#4E9F57] shadow-inner font-extrabold'
               : 'bg-white text-[#A19582] hover:text-[#5D5443] hover:bg-[#FDFCF0]'
           }`}
         >
-          <BookOpen size={24} className={activeTab === 'deposit' ? 'text-[#4E9F57] scale-110' : ''} />
-          책 저축하기
+          <BookOpen size={20} className={`shrink-0 sm:w-[24px] sm:h-[24px] ${activeTab === 'deposit' ? 'text-[#4E9F57] scale-110' : ''}`} />
+          <span className="whitespace-nowrap text-[13px] min-[360px]:text-[14px] sm:text-2xl">
+            차곡차곡 책 저축하기
+          </span>
         </button>
         <button
           onClick={() => setActiveTab('ledger')}
           id="tab-ledger-btn"
-          className={`flex-1 py-4.5 flex items-center justify-center gap-2 font-gaegu text-2xl font-bold transition-all duration-300 cursor-pointer ${
+          className={`flex-1 py-3 sm:py-4.5 flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2 font-gaegu text-xl sm:text-2xl font-bold transition-all duration-300 cursor-pointer ${
             activeTab === 'ledger'
               ? 'bg-[#FFF3E0] text-[#FF8B3D] shadow-inner font-extrabold'
               : 'bg-white text-[#A19582] hover:text-[#5D5443] hover:bg-[#FDFCF0]'
           }`}
         >
-          <PiggyBank size={24} className={activeTab === 'ledger' ? 'text-[#FF8B3D] scale-110' : ''} />
-          내 통장 보기
+          <PiggyBank size={20} className={`shrink-0 sm:w-[24px] sm:h-[24px] ${activeTab === 'ledger' ? 'text-[#FF8B3D] scale-110' : ''}`} />
+          <div className="flex flex-col items-center text-center sm:flex-row sm:gap-1">
+            <span className="whitespace-nowrap text-[13px] min-[360px]:text-[14px] sm:text-2xl">내 통장</span>
+            <span className="whitespace-nowrap text-[13px] min-[360px]:text-[14px] sm:text-2xl">보기</span>
+          </div>
         </button>
       </div>
     </div>
