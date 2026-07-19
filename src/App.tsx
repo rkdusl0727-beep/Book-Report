@@ -6,6 +6,7 @@ import BookDepositForm from './components/BookDepositForm';
 import PassbookLedger from './components/PassbookLedger';
 import CelebrationModal from './components/CelebrationModal';
 import CuteModal from './components/CuteModal';
+import SyncModal from './components/SyncModal';
 import { Sparkles, Star, Heart } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
@@ -20,6 +21,12 @@ export default function App() {
   const [showCelebration, setShowCelebration] = useState(false);
   const [celebrationBookCount, setCelebrationBookCount] = useState(0);
 
+  // Sync states
+  const [syncCode, setSyncCode] = useState<string | null>(null);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
+
   // Custom alert states
   const [alertConfig, setAlertConfig] = useState<{
     isOpen: boolean;
@@ -33,7 +40,7 @@ export default function App() {
     type: 'info'
   });
 
-  // Load books & owner name from storage on mount
+  // Load books, owner name & sync code from storage on mount
   useEffect(() => {
     const loadedBooks = loadBooksFromStorage();
     setBooks(loadedBooks);
@@ -46,7 +53,187 @@ export default function App() {
     if (storedTitle) {
       setOwnerTitle(storedTitle);
     }
+
+    const storedSyncCode = safeStorage.getItem('digital_reading_sync_code');
+    if (storedSyncCode) {
+      setSyncCode(storedSyncCode);
+    }
+
+    const storedEmail = safeStorage.getItem('digital_reading_user_email');
+    if (storedEmail) {
+      setUserEmail(storedEmail);
+    }
   }, []);
+
+  // Sync helper to push updates to the backend
+  const triggerAutoSync = (email: string | null, code: string | null, currentBooks: BookRecord[], currentName: string, currentTitle: string) => {
+    // 1. Account sync (prioritized, no manual button needed!)
+    if (email) {
+      fetch('/api/auth/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, books: currentBooks, ownerName: currentName, ownerTitle: currentTitle })
+      })
+      .then(res => res.json())
+      .then(data => {
+        if (data.success) {
+          console.log('[Sync] Cloud auto-saved successfully.');
+        }
+      })
+      .catch(err => {
+        console.warn('[Sync] Cloud auto-save failed:', err);
+      });
+    }
+
+    // 2. Legacy code sync (backward compatibility)
+    if (code) {
+      fetch('/api/sync/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ syncCode: code, books: currentBooks, ownerName: currentName, ownerTitle: currentTitle })
+      })
+      .then(res => res.json())
+      .then(data => {
+        if (data.success) {
+          console.log('[Sync] Legacy auto-saved successfully to server.');
+        } else {
+          console.warn('[Sync] Legacy auto-save failed:', data.error);
+        }
+      })
+      .catch(err => {
+        console.warn('[Sync] Legacy auto-save failed due to network error:', err);
+      });
+    }
+  };
+
+  // Sync action handlers
+  const handleCreateSyncCode = async () => {
+    setIsSyncing(true);
+    try {
+      const res = await fetch('/api/sync/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ books, ownerName, ownerTitle })
+      });
+      const data = await res.json();
+      if (data.success && data.syncCode) {
+        setSyncCode(data.syncCode);
+        safeStorage.setItem('digital_reading_sync_code', data.syncCode);
+        showCustomAlert('동기화 완료 🔄', `새로운 동기화 코드가 만들어졌어요!\n코드: ${data.syncCode}`, 'success');
+      } else {
+        showCustomAlert('실패', '동기화 코드를 만들지 못했어요. 잠시 후 다시 시도해 주세요.', 'warning');
+      }
+    } catch (e) {
+      showCustomAlert('오류', '네트워크 연결을 확인해 주세요.', 'warning');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const handleConnectSyncCode = async (code: string) => {
+    if (!code.trim()) {
+      showCustomAlert('입력 필요', '동기화 코드를 입력해 주세요!', 'warning');
+      return;
+    }
+    setIsSyncing(true);
+    const upperInput = code.trim().toUpperCase();
+    try {
+      const res = await fetch(`/api/sync/load/${upperInput}`);
+      if (!res.ok) {
+        const errData = await res.json();
+        showCustomAlert('연동 실패 ❌', errData.error || '존재하지 않는 코드예요. 다시 한 번 확인해 주세요.', 'warning');
+        return;
+      }
+      const data = await res.json();
+      if (data.success) {
+        setBooks(data.books);
+        setOwnerName(data.ownerName);
+        setOwnerTitle(data.ownerTitle);
+        setSyncCode(upperInput);
+
+        saveBooksToStorage(data.books);
+        safeStorage.setItem('digital_reading_owner_name', data.ownerName);
+        safeStorage.setItem('digital_reading_owner_title', data.ownerTitle);
+        safeStorage.setItem('digital_reading_sync_code', upperInput);
+
+        setIsSyncModalOpen(false);
+        showCustomAlert('연동 성공! 🎉', `[${data.ownerName}] 책통장의 기록을 성공적으로 가져왔어요!`, 'success');
+      }
+    } catch (e) {
+      showCustomAlert('오류', '네트워크 연결을 확인해 주세요.', 'warning');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const handleDisconnectSync = () => {
+    setSyncCode(null);
+    safeStorage.removeItem('digital_reading_sync_code');
+    showCustomAlert('연동 해제 완료', '기기 동기화를 해제했어요. 기기에 저장된 기록은 유지됩니다.', 'info');
+  };
+
+  // Account integration handlers
+  const handleRegisterAccount = async (email: string, pass: string) => {
+    setIsSyncing(true);
+    try {
+      const res = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password: pass, ownerName, ownerTitle, books })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setUserEmail(data.email);
+        safeStorage.setItem('digital_reading_user_email', data.email);
+        setIsSyncModalOpen(false);
+        showCustomAlert('계정 생성 완료 🎉', `[${data.email}] 계정이 만들어지고 실시간 자동 구름 동기화가 활성화되었어요!`, 'success');
+      } else {
+        showCustomAlert('가입 실패', data.error || '계정을 만들지 못했어요. 다시 확인해 주세요.', 'warning');
+      }
+    } catch (e) {
+      showCustomAlert('오류', '네트워크 연결을 확인해 주세요.', 'warning');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const handleLoginAccount = async (email: string, pass: string) => {
+    setIsSyncing(true);
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password: pass })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setUserEmail(data.email);
+        setBooks(data.books);
+        setOwnerName(data.ownerName);
+        setOwnerTitle(data.ownerTitle);
+
+        saveBooksToStorage(data.books);
+        safeStorage.setItem('digital_reading_owner_name', data.ownerName);
+        safeStorage.setItem('digital_reading_owner_title', data.ownerTitle);
+        safeStorage.setItem('digital_reading_user_email', data.email);
+
+        setIsSyncModalOpen(false);
+        showCustomAlert('로그인 성공! 🎉', `[${data.ownerName}] 책통장의 모든 기록을 안전하게 불러왔어요!`, 'success');
+      } else {
+        showCustomAlert('로그인 실패 ❌', data.error || '이메일 또는 비밀번호를 다시 확인해 주세요.', 'warning');
+      }
+    } catch (e) {
+      showCustomAlert('오류', '네트워크 연결을 확인해 주세요.', 'warning');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const handleLogoutAccount = () => {
+    setUserEmail(null);
+    safeStorage.removeItem('digital_reading_user_email');
+    showCustomAlert('로그아웃 완료', '안전하게 로그아웃 되었어요. 이 기기에서의 기록은 그대로 유지됩니다.', 'info');
+  };
 
   // Sync owner info to storage
   const handleUpdateOwnerInfo = (name: string, title: string) => {
@@ -54,9 +241,8 @@ export default function App() {
     setOwnerTitle(title);
     safeStorage.setItem('digital_reading_owner_name', name);
     safeStorage.setItem('digital_reading_owner_title', title);
+    triggerAutoSync(userEmail, syncCode, books, name, title);
   };
-
-
 
   // Trigger alert helper instead of default browser alert
   const showCustomAlert = (title: string, message: string, type: 'success' | 'warning' | 'info' = 'info') => {
@@ -73,6 +259,7 @@ export default function App() {
     const updatedBooks = [...books, newBook];
     setBooks(updatedBooks);
     saveBooksToStorage(updatedBooks);
+    triggerAutoSync(userEmail, syncCode, updatedBooks, ownerName, ownerTitle);
 
     // Direct transition to ledger view
     setActiveTab('ledger');
@@ -123,6 +310,7 @@ export default function App() {
     const updatedBooks = books.filter((b) => b.id !== id);
     setBooks(updatedBooks);
     saveBooksToStorage(updatedBooks);
+    triggerAutoSync(userEmail, syncCode, updatedBooks, ownerName, ownerTitle);
     showCustomAlert('삭제 완료', '기록을 통장에서 안전하게 지웠어요.', 'info');
   };
 
@@ -130,6 +318,7 @@ export default function App() {
   const handleClearAll = () => {
     setBooks([]);
     saveBooksToStorage([]);
+    triggerAutoSync(userEmail, syncCode, [], ownerName, ownerTitle);
     showCustomAlert('초기화 완료', '독서 통장이 새 주인을 기다려요! 기록이 모두 비워졌습니다.', 'warning');
   };
 
@@ -144,6 +333,9 @@ export default function App() {
           onUpdateOwnerInfo={handleUpdateOwnerInfo}
           activeTab={activeTab}
           setActiveTab={setActiveTab}
+          syncCode={syncCode}
+          onOpenSync={() => setIsSyncModalOpen(true)}
+          userEmail={userEmail}
         />
 
         {/* Tab Content with animations */}
@@ -188,6 +380,21 @@ export default function App() {
       >
         {alertConfig.message}
       </CuteModal>
+
+      {/* Sync / Device link Modal */}
+      <SyncModal
+        isOpen={isSyncModalOpen}
+        onClose={() => setIsSyncModalOpen(false)}
+        syncCode={syncCode}
+        onCreateSyncCode={handleCreateSyncCode}
+        onConnectSyncCode={handleConnectSyncCode}
+        onDisconnectSync={handleDisconnectSync}
+        isSyncing={isSyncing}
+        userEmail={userEmail}
+        onRegister={handleRegisterAccount}
+        onLogin={handleLoginAccount}
+        onLogout={handleLogoutAccount}
+      />
     </div>
   );
 }

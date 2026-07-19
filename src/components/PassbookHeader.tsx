@@ -1,5 +1,5 @@
 import { motion } from 'motion/react';
-import { BookOpen, PiggyBank, Edit3, Check, Award, Sprout } from 'lucide-react';
+import { BookOpen, PiggyBank, Edit3, Check, Award, Sprout, RefreshCw } from 'lucide-react';
 import { useState } from 'react';
 
 interface PassbookHeaderProps {
@@ -9,6 +9,9 @@ interface PassbookHeaderProps {
   onUpdateOwnerInfo: (name: string, title: string) => void;
   activeTab: 'deposit' | 'ledger';
   setActiveTab: (tab: 'deposit' | 'ledger') => void;
+  syncCode: string | null;
+  onOpenSync: () => void;
+  userEmail?: string | null;
 }
 
 // Dynamic Grade helper based on bookCount to keep children motivated!
@@ -108,7 +111,10 @@ export default function PassbookHeader({
   ownerTitle,
   onUpdateOwnerInfo,
   activeTab,
-  setActiveTab
+  setActiveTab,
+  syncCode,
+  onOpenSync,
+  userEmail
 }: PassbookHeaderProps) {
   const [isEditingName, setIsEditingName] = useState(false);
   const [nameInput, setNameInput] = useState(ownerName);
@@ -203,16 +209,56 @@ export default function PassbookHeader({
             </div>
             
             <div className="mt-1 space-y-1">
-              <div className="flex items-center">
+              <div className="flex items-center gap-2 flex-wrap">
                 <span className="font-bold text-[#4E9F57] bg-[#E8F5E9] px-2 py-0.5 rounded-lg flex items-center gap-1 text-[11px] sm:text-xs">
                   <Sprout size={13} className="text-[#6BCB77] inline shrink-0" />
                   {gradeInfo.title}
                 </span>
+
+                {userEmail ? (
+                  <button
+                    onClick={onOpenSync}
+                    className="font-bold text-[#4E9F57] bg-[#E8F5E9] border border-[#A8D5BA] px-2.5 py-0.5 rounded-lg flex items-center gap-1.5 text-[11px] sm:text-xs transition-colors cursor-pointer"
+                    title="클라우드 계정 정보 및 설정"
+                  >
+                    <span className="w-2 h-2 rounded-full bg-[#6BCB77] animate-pulse shrink-0" />
+                    <span>구름 저장 완료 ☁️</span>
+                  </button>
+                ) : syncCode ? (
+                  <button
+                    onClick={onOpenSync}
+                    className="font-bold text-[#2b72c4] bg-[#E1F5FE] hover:bg-[#B3E5FC] px-2 py-0.5 rounded-lg flex items-center gap-1 text-[11px] sm:text-xs transition-colors cursor-pointer"
+                    title="기기 연동 및 동기화 설정"
+                  >
+                    <RefreshCw size={11} className="shrink-0 text-[#2b72c4] animate-[spin_4s_linear_infinite]" />
+                    <span>연동됨: {syncCode}</span>
+                  </button>
+                ) : (
+                  <button
+                    onClick={onOpenSync}
+                    className="font-bold text-[#FF8B3D] bg-[#FFF3E0] hover:bg-[#FFE0B2] px-2 py-0.5 rounded-lg flex items-center gap-1 text-[11px] sm:text-xs transition-colors cursor-pointer"
+                    title="기기 연동 및 동기화 설정"
+                  >
+                    <RefreshCw size={11} className="shrink-0 text-[#FF8B3D]" />
+                    <span>기기 연동 🔄</span>
+                  </button>
+                )}
               </div>
-              <p className="font-sans text-[11px] sm:text-xs text-[#A19582] flex items-center gap-1.5 whitespace-nowrap overflow-x-auto scrollbar-none">
-                <span className="inline-block px-1.5 py-0.5 bg-[#FFF3E0] text-[#FF8B3D] font-gaegu font-bold text-xs rounded-md shrink-0">TIP 💡</span>
-                <span className="truncate">나만의 귀여운 독서통장 이름을 지어주세요</span>
-              </p>
+              <div className="font-sans text-[12px] sm:text-xs text-[#A19582] flex items-start sm:items-center gap-1.5">
+                <span className="inline-block px-1.5 py-0.5 bg-[#FFF3E0] text-[#FF8B3D] font-gaegu font-bold text-xs rounded-md shrink-0 mt-[1px] sm:mt-0">TIP 💡</span>
+                <div className="text-stone-600 font-medium leading-relaxed">
+                  {/* Mobile only: 2 lines */}
+                  <div className="flex flex-col sm:hidden">
+                    <span className="whitespace-nowrap">나만의 귀여운 독서통장</span>
+                    <span className="whitespace-nowrap font-bold text-[#FF8B3D]">이름을 지어주세요</span>
+                  </div>
+                  {/* Tablet/Laptop only: 1 line */}
+                  <div className="hidden sm:block whitespace-nowrap">
+                    <span>나만의 귀여운 독서통장 </span>
+                    <span className="font-bold text-[#FF8B3D]">이름을 지어주세요</span>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -263,8 +309,7 @@ export default function PassbookHeader({
         >
           <BookOpen size={22} className={`shrink-0 sm:w-[28px] sm:h-[28px] ${activeTab === 'deposit' ? 'text-[#4E9F57] scale-110' : ''}`} />
           <div className="flex flex-col items-center text-center sm:flex-row sm:gap-1 font-bold">
-            <span className="whitespace-nowrap text-[16px] min-[360px]:text-[17px] sm:text-3xl font-black">차곡차곡</span>
-            <span className="whitespace-nowrap text-[16px] min-[360px]:text-[17px] sm:text-3xl font-black">책 저축하기</span>
+            <span className="whitespace-nowrap text-[16px] min-[360px]:text-[17px] sm:text-3xl font-black">책통장에 저축하기</span>
           </div>
         </button>
         <button

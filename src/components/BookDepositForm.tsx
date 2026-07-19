@@ -599,7 +599,7 @@ export default function BookDepositForm({ onAddBook }: BookDepositFormProps) {
             id="save-book-btn"
             className="w-full sm:w-auto px-10 py-5 bg-[#6BCB77] text-white font-gaegu text-3xl font-extrabold rounded-3xl shadow-[0_5px_0_#4E9F57] hover:shadow-none hover:translate-y-1 active:scale-95 transition-all flex items-center justify-center gap-3 cursor-pointer"
           >
-            <Book size={28} /> 책 통장에 저금하기! <ArrowRight size={28} />
+            <Book size={28} /> 책통장에 저축하기! <ArrowRight size={28} />
           </button>
         </div>
       </form>

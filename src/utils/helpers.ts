@@ -1,38 +1,57 @@
 import { BookRecord } from '../types';
 
-// Safe in-memory fallback dictionary for all storage keys
+// Safe in-memory fallback dictionary for all storage keys to absolutely prevent crashes
 const memoryStorageDict: Record<string, string> = {};
+
+// Safely get localStorage without triggering crashes from direct property access in sandboxed or secure environments
+const getLocalStorage = (): Storage | null => {
+  try {
+    if (typeof window !== 'undefined' && 'localStorage' in window) {
+      // Some strict environments throw a SecurityError simply by accessing window.localStorage
+      const storage = window.localStorage;
+      if (storage) {
+        // Double check it's usable by doing a tiny test
+        const testKey = '__storage_test__';
+        storage.setItem(testKey, testKey);
+        storage.removeItem(testKey);
+        return storage;
+      }
+    }
+  } catch (e) {
+    // In-memory will be used instead
+  }
+  return null;
+};
 
 export const safeStorage = {
   getItem: (key: string): string | null => {
     try {
-      if (typeof window !== 'undefined') {
-        // Wrapping access inside try-catch to block sandbox SecurityErrors
-        const storage = window.localStorage;
-        if (storage) {
-          return storage.getItem(key);
+      const storage = getLocalStorage();
+      if (storage) {
+        const value = storage.getItem(key);
+        if (value !== null) {
+          // Sync to memory dictionary to keep them aligned
+          memoryStorageDict[key] = value;
+          return value;
         }
       }
     } catch (e) {
-      console.warn(`[Storage Defense] localStorage.getItem failed for key "${key}". Using memory fallback.`, e);
+      console.warn(`[Storage Defense] safeStorage.getItem failed for key "${key}". Using memory fallback.`, e);
     }
     return memoryStorageDict[key] || null;
   },
 
   setItem: (key: string, value: string): boolean => {
-    // Sync to memory dictionary first to ensure it's always available
+    // Sync to memory dictionary first to ensure it's always available instantly
     memoryStorageDict[key] = value;
     try {
-      if (typeof window !== 'undefined') {
-        // Wrapping access inside try-catch to block sandbox SecurityErrors
-        const storage = window.localStorage;
-        if (storage) {
-          storage.setItem(key, value);
-          return true;
-        }
+      const storage = getLocalStorage();
+      if (storage) {
+        storage.setItem(key, value);
+        return true;
       }
     } catch (e) {
-      console.warn(`[Storage Defense] localStorage.setItem failed for key "${key}". Saved to memory instead.`, e);
+      console.warn(`[Storage Defense] safeStorage.setItem failed for key "${key}". Saved to memory instead.`, e);
     }
     return false;
   },
@@ -40,16 +59,13 @@ export const safeStorage = {
   removeItem: (key: string): boolean => {
     delete memoryStorageDict[key];
     try {
-      if (typeof window !== 'undefined') {
-        // Wrapping access inside try-catch to block sandbox SecurityErrors
-        const storage = window.localStorage;
-        if (storage) {
-          storage.removeItem(key);
-          return true;
-        }
+      const storage = getLocalStorage();
+      if (storage) {
+        storage.removeItem(key);
+        return true;
       }
     } catch (e) {
-      console.warn(`[Storage Defense] localStorage.removeItem failed for key "${key}". Removed from memory.`, e);
+      console.warn(`[Storage Defense] safeStorage.removeItem failed for key "${key}". Removed from memory.`, e);
     }
     return false;
   }
