@@ -151,7 +151,7 @@ export default function PassbookHeader({
     <div className="w-full bg-white rounded-[40px] border-4 border-[#E6D5B8] shadow-md overflow-hidden mb-8">
       <div className="p-6 flex flex-col md:flex-row md:items-center justify-between gap-6 bg-[#FDFCF0]/50">
         {/* Passbook Owner Identity in Natural Theme */}
-        <div className="flex flex-col sm:flex-row items-center sm:items-start gap-4 w-full md:w-auto">
+        <div className="flex flex-col sm:flex-row items-center sm:items-start gap-4 w-full md:w-auto order-1 md:order-none">
           {/* Dynamic Interactive Level Badge & Grade Name under it */}
           <div className="flex flex-col items-center gap-2 shrink-0">
             <div 
@@ -276,7 +276,7 @@ export default function PassbookHeader({
         </div>
 
         {/* Real-time Savings visualizer with custom cumulative journey to 30 */}
-        <div className="bg-white px-5 py-4.5 rounded-3xl border-2 border-[#E6D5B8] shadow-sm flex flex-col gap-3.5 md:max-w-md w-full">
+        <div className="bg-white px-5 py-4.5 rounded-3xl border-2 border-[#E6D5B8] shadow-sm flex flex-col gap-3.5 md:max-w-md w-full order-2 md:order-none">
           {/* Circular counts */}
           <div className="flex items-center justify-between gap-2 flex-wrap min-[380px]:flex-nowrap">
             <div className="flex items-center gap-1.5 shrink-0">
