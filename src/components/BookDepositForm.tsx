@@ -420,10 +420,10 @@ export default function BookDepositForm({ onAddBook }: BookDepositFormProps) {
           </div>
         </div>
 
-        {/* Question 4: 소감 녹음하기 */}
+        {/* Question 4: 소감을 녹음해요 */}
         <div className="space-y-3">
           <label className="block font-gaegu text-[20px] min-[360px]:text-2xl font-bold text-[#4A4439] whitespace-nowrap overflow-hidden text-ellipsis">
-            4. 소감 녹음하기
+            4. 소감을 녹음해요
           </label>
           <div className="p-5 bg-[#FDFCF0]/30 rounded-2xl border-2 border-[#E6D5B8] flex flex-col sm:flex-row items-center justify-between gap-4">
             <div className="flex flex-col sm:flex-row items-center sm:items-start gap-3 w-full text-center sm:text-left">

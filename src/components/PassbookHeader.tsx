@@ -233,7 +233,7 @@ export default function PassbookHeader({
             
             <div className="w-full flex flex-col items-center sm:items-start gap-1">
               {/* TIP Box right under the name */}
-              <div className="font-sans text-[12px] sm:text-xs text-[#A19582] flex items-center gap-1.5 justify-center sm:justify-start w-full flex-wrap sm:flex-nowrap">
+              <div className="font-sans text-[12px] sm:text-xs text-[#A19582] flex items-center gap-1.5 justify-center sm:justify-start w-full flex-wrap">
                 <span className="inline-block px-1.5 py-0.5 bg-[#FFF3E0] text-[#FF8B3D] font-gaegu font-bold text-xs rounded-md shrink-0">TIP 💡</span>
                 <span className="text-stone-600 font-medium text-[12px] sm:text-xs">
                   나만의 귀여운 독서통장 <span className="font-bold text-[#FF8B3D]">이름을 지어주세요</span>
@@ -276,20 +276,20 @@ export default function PassbookHeader({
         </div>
 
         {/* Real-time Savings visualizer with custom cumulative journey to 30 */}
-        <div className="bg-white px-5 py-4.5 rounded-3xl border-2 border-[#E6D5B8] shadow-sm flex flex-col gap-3.5 md:max-w-md w-full order-first md:order-none">
+        <div className="bg-white px-5 py-4.5 rounded-3xl border-2 border-[#E6D5B8] shadow-sm flex flex-col gap-3.5 md:max-w-md w-full">
           {/* Circular counts */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <span className="font-gaegu text-xl text-[#5D5443] font-bold">누적 저축</span>
-              <div className="flex items-baseline gap-0.5">
-                <span className="font-gaegu text-3xl font-extrabold text-[#6BCB77]">
+          <div className="flex items-center justify-between gap-2 flex-wrap min-[380px]:flex-nowrap">
+            <div className="flex items-center gap-1.5 shrink-0">
+              <span className="font-gaegu text-xl text-[#5D5443] font-bold whitespace-nowrap shrink-0">누적 저축</span>
+              <div className="flex items-baseline gap-0.5 whitespace-nowrap shrink-0">
+                <span className="font-gaegu text-3xl font-extrabold text-[#6BCB77] leading-none">
                   {bookCount}
                 </span>
-                <span className="font-gaegu text-xl text-[#4A4439] font-bold">/ 30권</span>
+                <span className="font-gaegu text-xl text-[#4A4439] font-bold leading-none">/ 30권</span>
               </div>
             </div>
             
-            <div className="text-[11px] font-sans text-[#8C7E6A] font-bold bg-[#FDFCF0] px-2 py-0.5 rounded-lg border border-[#E6D5B8]">
+            <div className="text-[11px] font-sans text-[#8C7E6A] font-bold bg-[#FDFCF0] px-2 py-0.5 rounded-lg border border-[#E6D5B8] shrink-0 whitespace-nowrap">
               {bookCount >= 30 ? (
                 <span className="text-[#E53935] font-extrabold animate-bounce inline-block">🎉 모든 등급 완성!</span>
               ) : (
