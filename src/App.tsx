@@ -268,12 +268,10 @@ export default function App() {
     showCustomAlert('참 잘했어요!', `와아! [${newBook.title}] 책 저축에 성공했어요!`, 'success');
 
     // Mega Confetti & Certificate Milestone logic
-    const oldMilestoneCount = Math.floor(books.length / 10);
-    const newMilestoneCount = Math.floor(updatedBooks.length / 10);
+    const targetCount = updatedBooks.length;
 
-    // Trigger celebration when count hits a new multiple of 10 (e.g. 10, 20, 30...)
-    if (newMilestoneCount > oldMilestoneCount && updatedBooks.length % 10 === 0) {
-      const targetCount = updatedBooks.length;
+    // Trigger celebration when count hits any multiple of 10 books! (10, 20, 30, 40, etc.)
+    if (targetCount > 0 && targetCount % 10 === 0) {
       setCelebrationBookCount(targetCount);
 
       // Trigger Mega Confetti explosion!

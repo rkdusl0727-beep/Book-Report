@@ -3,8 +3,14 @@ import { BookRecord } from '../types';
 // Safe in-memory fallback dictionary for all storage keys to absolutely prevent crashes
 const memoryStorageDict: Record<string, string> = {};
 
+let isStorageChecked = false;
+let cachedStorage: Storage | null = null;
+
 // Safely get localStorage without triggering crashes from direct property access in sandboxed or secure environments
 const getLocalStorage = (): Storage | null => {
+  if (isStorageChecked) {
+    return cachedStorage;
+  }
   try {
     if (typeof window !== 'undefined' && 'localStorage' in window) {
       // Some strict environments throw a SecurityError simply by accessing window.localStorage
@@ -14,13 +20,16 @@ const getLocalStorage = (): Storage | null => {
         const testKey = '__storage_test__';
         storage.setItem(testKey, testKey);
         storage.removeItem(testKey);
-        return storage;
+        cachedStorage = storage;
+        console.log('[Storage Defense] LocalStorage is fully supported and verified.');
       }
     }
   } catch (e) {
-    // In-memory will be used instead
+    console.warn('[Storage Defense] LocalStorage is not accessible (e.g. secure sandboxed iframe, private browsing). Using memory fallback safely.', e);
+    cachedStorage = null;
   }
-  return null;
+  isStorageChecked = true;
+  return cachedStorage;
 };
 
 export const safeStorage = {
@@ -76,14 +85,17 @@ export const saveBooksToStorage = (books: BookRecord[]): boolean => {
 };
 
 export const loadBooksFromStorage = (): BookRecord[] => {
-  const data = safeStorage.getItem('digital_reading_books');
-  if (data) {
-    try {
-      return JSON.parse(data) as BookRecord[];
-    } catch (e) {
-      console.error('[Storage Defense] Failed to parse books data, returning empty list.', e);
-      return [];
+  try {
+    const data = safeStorage.getItem('digital_reading_books');
+    if (data) {
+      const parsed = JSON.parse(data);
+      if (Array.isArray(parsed)) {
+        // Prevent crashes by ensuring only valid BookRecord objects are returned
+        return parsed.filter(item => item && typeof item === 'object' && 'title' in item) as BookRecord[];
+      }
     }
+  } catch (e) {
+    console.error('[Storage Defense] Failed to parse books data. Returning empty list.', e);
   }
   return [];
 };
