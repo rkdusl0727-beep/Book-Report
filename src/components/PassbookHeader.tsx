@@ -288,14 +288,6 @@ export default function PassbookHeader({
                 <span className="font-gaegu text-xl text-[#4A4439] font-bold leading-none">/ 30권</span>
               </div>
             </div>
-            
-            <div className="text-[11px] font-sans text-[#8C7E6A] font-bold bg-[#FDFCF0] px-2 py-0.5 rounded-lg border border-[#E6D5B8] shrink-0 whitespace-nowrap">
-              {bookCount >= 30 ? (
-                <span className="text-[#E53935] font-extrabold animate-bounce inline-block">🎉 모든 등급 완성!</span>
-              ) : (
-                <span>다음 등급까지 {10 - (bookCount % 10)}권 남음</span>
-              )}
-            </div>
           </div>
 
           {/* Gamified 0 to 30 Progress Road */}
