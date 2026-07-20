@@ -151,26 +151,34 @@ export default function PassbookHeader({
     <div className="w-full bg-white rounded-[40px] border-4 border-[#E6D5B8] shadow-md overflow-hidden mb-8">
       <div className="p-6 flex flex-col md:flex-row md:items-center justify-between gap-6 bg-[#FDFCF0]/50">
         {/* Passbook Owner Identity in Natural Theme */}
-        <div className="flex items-center gap-4">
-          {/* Dynamic Interactive Level Badge */}
-          <div 
-            className="w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-[#E8F5E9] border-4 border-white shadow-md overflow-hidden flex items-center justify-center shrink-0"
-            title={gradeInfo.title}
-          >
-            {gradeInfo.icon}
+        <div className="flex flex-col sm:flex-row items-center sm:items-start gap-4 w-full md:w-auto">
+          {/* Dynamic Interactive Level Badge & Grade Name under it */}
+          <div className="flex flex-col items-center gap-2 shrink-0">
+            <div 
+              className="w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-[#E8F5E9] border-4 border-white shadow-md overflow-hidden flex items-center justify-center"
+              title={gradeInfo.title}
+            >
+              {gradeInfo.icon}
+            </div>
+            
+            {/* Seed/Sprout/etc. Grade Tag directly under the Profile Picture */}
+            <span className="font-bold text-[#4E9F57] bg-[#E8F5E9] border border-[#C2E8C6] px-2 py-0.5 rounded-lg flex items-center gap-1 text-[11px] sm:text-xs shadow-sm">
+              {gradeInfo.miniIcon}
+              <span className="font-gaegu text-[12px] sm:text-xs font-black text-[#2E7D32]">{gradeInfo.title}</span>
+            </span>
           </div>
 
-          <div>
-            <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex-1 flex flex-col items-center sm:items-start text-center sm:text-left gap-2 w-full mt-1">
+            <div className="flex items-center gap-2 flex-wrap justify-center sm:justify-start w-full">
               {isEditingName ? (
-                <div className="flex items-center gap-1.5 flex-wrap">
+                <div className="flex items-center gap-1.5 flex-wrap justify-center sm:justify-start">
                   {/* Name field (이름) */}
                   <input
                     type="text"
                     value={nameInput}
                     onChange={(e) => setNameInput(e.target.value)}
                     maxLength={10}
-                    className="px-2.5 py-1 text-base sm:text-lg font-bold font-gaegu border-2 border-[#E6D5B8] rounded-xl outline-none focus:border-[#6BCB77] bg-white text-[#4A4439] max-w-[110px] text-center"
+                    className="px-2.5 py-1 text-base sm:text-lg font-bold font-gaegu border-2 border-[#E6D5B8] rounded-xl outline-none focus:border-[#6BCB77] bg-white text-[#4A4439] max-w-[100px] text-center"
                     placeholder="이름 (예: 이가연)"
                     title="통장 주인 Name"
                   />
@@ -181,7 +189,7 @@ export default function PassbookHeader({
                     value={titleInput}
                     onChange={(e) => setTitleInput(e.target.value)}
                     maxLength={15}
-                    className="px-2.5 py-1 text-base sm:text-lg font-bold font-gaegu border-2 border-[#E6D5B8] rounded-xl outline-none focus:border-[#6BCB77] bg-white text-[#4A4439] max-w-[140px] text-center"
+                    className="px-2.5 py-1 text-base sm:text-lg font-bold font-gaegu border-2 border-[#E6D5B8] rounded-xl outline-none focus:border-[#6BCB77] bg-white text-[#4A4439] max-w-[120px] text-center"
                     placeholder="수식어 (예: 반짝반짝)"
                     title="통장 Modifier"
                   />
@@ -189,7 +197,7 @@ export default function PassbookHeader({
                   <button
                     onClick={handleSaveName}
                     id="save-name-btn"
-                    className="p-1.5 bg-[#6BCB77] hover:bg-[#4E9F57] text-white rounded-xl shadow-sm transition-colors cursor-pointer"
+                    className="p-1.5 bg-[#6BCB77] hover:bg-[#4E9F57] text-white rounded-xl shadow-sm transition-colors cursor-pointer flex items-center justify-center shrink-0"
                   >
                     <Check size={16} />
                   </button>
@@ -198,36 +206,42 @@ export default function PassbookHeader({
                   </span>
                 </div>
               ) : (
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="font-gaegu text-2xl sm:text-3xl font-bold text-[#5D5443] flex items-center gap-1 flex-wrap">
+                <div className="flex items-center gap-2 flex-wrap justify-center sm:justify-start w-full">
+                  <span className="font-gaegu text-2xl sm:text-3xl font-bold text-[#5D5443] flex items-center gap-1 flex-wrap justify-center sm:justify-start">
                     <span className="text-[#4E9F57] underline decoration-wavy decoration-[#FFD93D] decoration-2">{ownerName}</span>
                     <span className="text-[#8C7E6A] text-xl sm:text-2xl">의</span>
                     <span className="text-[#FF8B3D]">{ownerTitle}</span>
-                    <span>독서통장</span>
+                    <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+                      <span>독서통장</span>
+                      <button
+                        onClick={() => {
+                          setNameInput(ownerName);
+                          setTitleInput(ownerTitle);
+                          setIsEditingName(true);
+                        }}
+                        id="edit-name-btn"
+                        className="p-1 text-[#A19582] hover:text-[#5D5443] hover:bg-[#E6D5B8]/20 rounded-lg transition-colors cursor-pointer animate-pulse inline-flex items-center justify-center align-middle"
+                        title="통장 이름 수정하기"
+                      >
+                        <Edit3 size={18} />
+                      </button>
+                    </span>
                   </span>
-                  <button
-                    onClick={() => {
-                      setNameInput(ownerName);
-                      setTitleInput(ownerTitle);
-                      setIsEditingName(true);
-                    }}
-                    id="edit-name-btn"
-                    className="p-1.5 text-[#A19582] hover:text-[#5D5443] hover:bg-[#E6D5B8]/20 rounded-lg transition-colors cursor-pointer animate-pulse"
-                    title="통장 이름 수정하기"
-                  >
-                    <Edit3 size={18} />
-                  </button>
                 </div>
               )}
             </div>
             
-            <div className="mt-1 space-y-1">
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="font-bold text-[#4E9F57] bg-[#E8F5E9] px-2 py-0.5 rounded-lg flex items-center gap-1.5 text-[11px] sm:text-xs">
-                  {gradeInfo.miniIcon}
-                  {gradeInfo.title}
+            <div className="w-full flex flex-col items-center sm:items-start gap-1">
+              {/* TIP Box right under the name */}
+              <div className="font-sans text-[12px] sm:text-xs text-[#A19582] flex items-center gap-1.5 justify-center sm:justify-start w-full flex-wrap sm:flex-nowrap">
+                <span className="inline-block px-1.5 py-0.5 bg-[#FFF3E0] text-[#FF8B3D] font-gaegu font-bold text-xs rounded-md shrink-0">TIP 💡</span>
+                <span className="text-stone-600 font-medium text-[12px] sm:text-xs">
+                  나만의 귀여운 독서통장 <span className="font-bold text-[#FF8B3D]">이름을 지어주세요</span>
                 </span>
+              </div>
 
+              {/* Connection / Sync Buttons */}
+              <div className="flex items-center gap-2 flex-wrap justify-center sm:justify-start w-full mt-1.5">
                 {userEmail ? (
                   <button
                     onClick={onOpenSync}
@@ -257,27 +271,12 @@ export default function PassbookHeader({
                   </button>
                 )}
               </div>
-              <div className="font-sans text-[12px] sm:text-xs text-[#A19582] flex items-start sm:items-center gap-1.5">
-                <span className="inline-block px-1.5 py-0.5 bg-[#FFF3E0] text-[#FF8B3D] font-gaegu font-bold text-xs rounded-md shrink-0 mt-[1px] sm:mt-0">TIP 💡</span>
-                <div className="text-stone-600 font-medium leading-relaxed">
-                  {/* Mobile only: 2 lines */}
-                  <div className="flex flex-col sm:hidden">
-                    <span className="whitespace-nowrap">나만의 귀여운 독서통장</span>
-                    <span className="whitespace-nowrap font-bold text-[#FF8B3D]">이름을 지어주세요</span>
-                  </div>
-                  {/* Tablet/Laptop only: 1 line */}
-                  <div className="hidden sm:block whitespace-nowrap">
-                    <span>나만의 귀여운 독서통장 </span>
-                    <span className="font-bold text-[#FF8B3D]">이름을 지어주세요</span>
-                  </div>
-                </div>
-              </div>
             </div>
           </div>
         </div>
 
         {/* Real-time Savings visualizer with custom cumulative journey to 30 */}
-        <div className="bg-white px-5 py-4.5 rounded-3xl border-2 border-[#E6D5B8] shadow-sm flex flex-col gap-3.5 md:max-w-md w-full">
+        <div className="bg-white px-5 py-4.5 rounded-3xl border-2 border-[#E6D5B8] shadow-sm flex flex-col gap-3.5 md:max-w-md w-full order-first md:order-none">
           {/* Circular counts */}
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
