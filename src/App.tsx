@@ -40,7 +40,71 @@ export default function App() {
     type: 'info'
   });
 
-  // Load books, owner name & sync code from storage on mount
+  // Helper to merge local and cloud books safely without duplicates
+  const mergeBooks = (cloudBooks: BookRecord[], localBooks: BookRecord[]): BookRecord[] => {
+    const map = new Map<string, BookRecord>();
+    cloudBooks.forEach((b) => map.set(b.id, b));
+    localBooks.forEach((b) => {
+      if (!map.has(b.id)) {
+        map.set(b.id, b);
+      }
+    });
+    return Array.from(map.values());
+  };
+
+  // Helper to fetch latest data from cloud
+  const fetchLatestFromCloud = async (silent = true) => {
+    const activeEmail = safeStorage.getItem('digital_reading_user_email') || userEmail;
+    const activeCode = safeStorage.getItem('digital_reading_sync_code') || syncCode;
+
+    if (activeEmail) {
+      try {
+        const res = await fetch(`/api/auth/user/${encodeURIComponent(activeEmail.trim().toLowerCase())}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success) {
+            const cloudBooks = data.books || [];
+            setBooks(cloudBooks);
+            setOwnerName(data.ownerName || '이가연');
+            setOwnerTitle(data.ownerTitle || '반짝반짝');
+
+            saveBooksToStorage(cloudBooks);
+            safeStorage.setItem('digital_reading_owner_name', data.ownerName || '이가연');
+            safeStorage.setItem('digital_reading_owner_title', data.ownerTitle || '반짝반짝');
+            if (!silent) {
+              showCustomAlert('동기화 완료 ☁️', '최신 구름 데이터를 성공적으로 가져왔어요!', 'success');
+            }
+          }
+        }
+      } catch (e) {
+        if (!silent) console.warn('Cloud fetch failed:', e);
+      }
+    } else if (activeCode) {
+      try {
+        const res = await fetch(`/api/sync/load/${encodeURIComponent(activeCode.trim().toUpperCase())}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success) {
+            const cloudBooks = data.books || [];
+            setBooks(cloudBooks);
+            setOwnerName(data.ownerName || '이가연');
+            setOwnerTitle(data.ownerTitle || '반짝반짝');
+
+            saveBooksToStorage(cloudBooks);
+            safeStorage.setItem('digital_reading_owner_name', data.ownerName || '이가연');
+            safeStorage.setItem('digital_reading_owner_title', data.ownerTitle || '반짝반짝');
+            if (!silent) {
+              showCustomAlert('동기화 완료 🔄', '최신 동기화 데이터를 불러왔어요!', 'success');
+            }
+          }
+        }
+      } catch (e) {
+        if (!silent) console.warn('Sync code fetch failed:', e);
+      }
+    }
+  };
+
+  // Load books, owner name & sync code from storage on mount + Cloud fetch
   useEffect(() => {
     const loadedBooks = loadBooksFromStorage();
     setBooks(loadedBooks);
@@ -63,7 +127,31 @@ export default function App() {
     if (storedEmail) {
       setUserEmail(storedEmail);
     }
+
+    // Initial cloud fetch on launch
+    fetchLatestFromCloud(true);
   }, []);
+
+  // Periodic cloud poll + fetch on tab focus / visibility change
+  useEffect(() => {
+    const handleFocus = () => {
+      fetchLatestFromCloud(true);
+    };
+
+    window.addEventListener('focus', handleFocus);
+    document.addEventListener('visibilitychange', handleFocus);
+
+    // Poll every 10 seconds if logged in or using sync code
+    const interval = setInterval(() => {
+      fetchLatestFromCloud(true);
+    }, 10000);
+
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleFocus);
+      clearInterval(interval);
+    };
+  }, [userEmail, syncCode]);
 
   // Sync helper to push updates to the backend
   const triggerAutoSync = (email: string | null, code: string | null, currentBooks: BookRecord[], currentName: string, currentTitle: string) => {
@@ -72,7 +160,7 @@ export default function App() {
       fetch('/api/auth/save', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, books: currentBooks, ownerName: currentName, ownerTitle: currentTitle })
+        body: JSON.stringify({ email: email.trim().toLowerCase(), books: currentBooks, ownerName: currentName, ownerTitle: currentTitle })
       })
       .then(res => res.json())
       .then(data => {
@@ -90,7 +178,7 @@ export default function App() {
       fetch('/api/sync/save', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ syncCode: code, books: currentBooks, ownerName: currentName, ownerTitle: currentTitle })
+        body: JSON.stringify({ syncCode: code.trim().toUpperCase(), books: currentBooks, ownerName: currentName, ownerTitle: currentTitle })
       })
       .then(res => res.json())
       .then(data => {
@@ -146,18 +234,24 @@ export default function App() {
       }
       const data = await res.json();
       if (data.success) {
-        setBooks(data.books);
-        setOwnerName(data.ownerName);
-        setOwnerTitle(data.ownerTitle);
+        const currentLocalBooks = loadBooksFromStorage();
+        const mergedBooks = mergeBooks(data.books || [], currentLocalBooks);
+
+        setBooks(mergedBooks);
+        setOwnerName(data.ownerName || ownerName);
+        setOwnerTitle(data.ownerTitle || ownerTitle);
         setSyncCode(upperInput);
 
-        saveBooksToStorage(data.books);
-        safeStorage.setItem('digital_reading_owner_name', data.ownerName);
-        safeStorage.setItem('digital_reading_owner_title', data.ownerTitle);
+        saveBooksToStorage(mergedBooks);
+        safeStorage.setItem('digital_reading_owner_name', data.ownerName || ownerName);
+        safeStorage.setItem('digital_reading_owner_title', data.ownerTitle || ownerTitle);
         safeStorage.setItem('digital_reading_sync_code', upperInput);
 
+        // Sync back merged state
+        triggerAutoSync(userEmail, upperInput, mergedBooks, data.ownerName || ownerName, data.ownerTitle || ownerTitle);
+
         setIsSyncModalOpen(false);
-        showCustomAlert('연동 성공! 🎉', `[${data.ownerName}] 책통장의 기록을 성공적으로 가져왔어요!`, 'success');
+        showCustomAlert('연동 성공! 🎉', `[${data.ownerName}] 책통장의 기록을 성공적으로 가져와 연동했어요!`, 'success');
       }
     } catch (e) {
       showCustomAlert('오류', '네트워크 연결을 확인해 주세요.', 'warning');
@@ -175,11 +269,12 @@ export default function App() {
   // Account integration handlers
   const handleRegisterAccount = async (email: string, pass: string) => {
     setIsSyncing(true);
+    const normalizedEmail = email.trim().toLowerCase();
     try {
       const res = await fetch('/api/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password: pass, ownerName, ownerTitle, books })
+        body: JSON.stringify({ email: normalizedEmail, password: pass.trim(), ownerName, ownerTitle, books })
       });
       const data = await res.json();
       if (res.ok && data.success) {
@@ -199,26 +294,38 @@ export default function App() {
 
   const handleLoginAccount = async (email: string, pass: string) => {
     setIsSyncing(true);
+    const normalizedEmail = email.trim().toLowerCase();
     try {
       const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password: pass })
+        body: JSON.stringify({ email: normalizedEmail, password: pass.trim() })
       });
       const data = await res.json();
       if (res.ok && data.success) {
         setUserEmail(data.email);
-        setBooks(data.books);
-        setOwnerName(data.ownerName);
-        setOwnerTitle(data.ownerTitle);
 
-        saveBooksToStorage(data.books);
-        safeStorage.setItem('digital_reading_owner_name', data.ownerName);
-        safeStorage.setItem('digital_reading_owner_title', data.ownerTitle);
+        // Merge any local offline books on this device with cloud books
+        const currentLocalBooks = loadBooksFromStorage();
+        const mergedBooks = mergeBooks(data.books || [], currentLocalBooks);
+
+        const finalName = data.ownerName || ownerName;
+        const finalTitle = data.ownerTitle || ownerTitle;
+
+        setBooks(mergedBooks);
+        setOwnerName(finalName);
+        setOwnerTitle(finalTitle);
+
+        saveBooksToStorage(mergedBooks);
+        safeStorage.setItem('digital_reading_owner_name', finalName);
+        safeStorage.setItem('digital_reading_owner_title', finalTitle);
         safeStorage.setItem('digital_reading_user_email', data.email);
 
+        // Immediately sync merged books back to cloud server
+        triggerAutoSync(data.email, syncCode, mergedBooks, finalName, finalTitle);
+
         setIsSyncModalOpen(false);
-        showCustomAlert('로그인 성공! 🎉', `[${data.ownerName}] 책통장의 모든 기록을 안전하게 불러왔어요!`, 'success');
+        showCustomAlert('로그인 성공! 🎉', `[${finalName}] 책통장의 모든 기록을 안전하게 불러와 연동했어요!`, 'success');
       } else {
         showCustomAlert('로그인 실패 ❌', data.error || '이메일 또는 비밀번호를 다시 확인해 주세요.', 'warning');
       }
@@ -395,6 +502,7 @@ export default function App() {
         onRegister={handleRegisterAccount}
         onLogin={handleLoginAccount}
         onLogout={handleLogoutAccount}
+        onManualSync={() => fetchLatestFromCloud(false)}
       />
     </div>
   );

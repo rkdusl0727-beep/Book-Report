@@ -62,11 +62,11 @@ async function startServer() {
     const users = readUsersStore();
 
     if (users[trimmedEmail]) {
-      return res.status(400).json({ success: false, error: '이미 등록된 이메일 계정이에요. 다른 이메일을 입력해 주세요.' });
+      return res.status(400).json({ success: false, error: '이미 등록된 이메일 계정이에요. 기존 계정으로 로그인해 주세요.' });
     }
 
     users[trimmedEmail] = {
-      password: String(password),
+      password: String(password).trim(),
       ownerName: ownerName || '이가연',
       ownerTitle: ownerTitle || '반짝반짝',
       books: books || [],
@@ -88,8 +88,8 @@ async function startServer() {
     const users = readUsersStore();
     const user = users[trimmedEmail];
 
-    if (!user || user.password !== String(password)) {
-      return res.status(400).json({ success: false, error: '이메일 또는 비밀번호가 올바르지 않아요. 다시 한 번 확인해 주세요.' });
+    if (!user || user.password !== String(password).trim()) {
+      return res.status(400).json({ success: false, error: '이메일 또는 비밀번호가 올바르지 않아요. 회원가입을 하지 않으셨다면 [새로운 구름 계정 만들기]를 진행해 주세요.' });
     }
 
     res.json({
@@ -97,8 +97,27 @@ async function startServer() {
       email: trimmedEmail,
       ownerName: user.ownerName,
       ownerTitle: user.ownerTitle,
-      books: user.books
+      books: user.books || []
     });
+  });
+
+  // API Route: Get User Data for Cloud Auto-Sync
+  app.get("/api/auth/user/:email", (req, res) => {
+    const trimmedEmail = String(req.params.email).trim().toLowerCase();
+    const users = readUsersStore();
+    const user = users[trimmedEmail];
+
+    if (user) {
+      res.json({
+        success: true,
+        email: trimmedEmail,
+        ownerName: user.ownerName,
+        ownerTitle: user.ownerTitle,
+        books: user.books || []
+      });
+    } else {
+      res.status(404).json({ success: false, error: '등록되지 않은 이메일 계정입니다.' });
+    }
   });
 
   // API Route: Auto-Sync save

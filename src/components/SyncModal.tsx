@@ -16,6 +16,7 @@ interface SyncModalProps {
   onRegister: (email: string, pass: string) => Promise<void>;
   onLogin: (email: string, pass: string) => Promise<void>;
   onLogout: () => void;
+  onManualSync?: () => void;
 }
 
 export default function SyncModal({
@@ -29,7 +30,8 @@ export default function SyncModal({
   userEmail,
   onRegister,
   onLogin,
-  onLogout
+  onLogout,
+  onManualSync
 }: SyncModalProps) {
   // Mode selection: 'email' (new) or 'legacy' (old code sync)
   const [syncMethod, setSyncMethod] = useState<'email' | 'legacy'>('email');
@@ -123,19 +125,29 @@ export default function SyncModal({
                     <span className="font-mono text-lg font-bold text-stone-700 block">{userEmail}</span>
                     <div className="flex items-center justify-center gap-1.5 mt-2 text-xs text-[#4E9F57] font-semibold">
                       <span className="w-2.5 h-2.5 rounded-full bg-[#6BCB77] animate-ping" />
-                      <span>연동 버튼 없이 자동으로 실시간 저장 중이에요</span>
+                      <span>기기 간 실시간 자동 저장 & 동기화 활성화됨</span>
                     </div>
                   </div>
 
-                  <div className="bg-[#FDFCF0] border border-[#E6D5B8] p-4 rounded-2xl text-xs text-stone-600 space-y-1.5 leading-relaxed">
-                    <p className="font-bold text-[#FF8B3D] mb-1">💡 다른 폰이나 태블릿에서 사용하기:</p>
-                    <p>1. 연동하려는 기기에서 똑같이 이 앱을 켭니다.</p>
-                    <p>2. 오른쪽 위 [구름 연동] 또는 [기기 연동] 버튼을 누릅니다.</p>
-                    <p>3. 위 계정(<strong className="text-stone-800">{userEmail}</strong>)으로 로그인하시면 통장의 모든 저축 내역이 마법처럼 그대로 나타나요!</p>
+                  {onManualSync && (
+                    <button
+                      type="button"
+                      onClick={onManualSync}
+                      className="w-full py-2.5 bg-[#E8F5E9] hover:bg-[#C2E8C6] text-[#2E7D32] border border-[#A8D5BA] rounded-xl font-gaegu text-lg font-bold transition-all flex items-center justify-center gap-2 cursor-pointer shadow-sm"
+                    >
+                      <RefreshCw size={16} className="animate-spin" /> 지금 최신 데이터로 새로고침 🔄
+                    </button>
+                  )}
+
+                  <div className="bg-[#FDFCF0] border border-[#E6D5B8] p-4 rounded-2xl text-xs text-stone-600 space-y-2 leading-relaxed">
+                    <p className="font-bold text-[#FF8B3D] text-sm">💡 핸드폰과 태블릿 기기연동 안내</p>
+                    <p>1. 태블릿에서도 똑같이 이 디지털 독서통장 웹페이지를 열어주세요.</p>
+                    <p>2. 오른쪽 상단 <strong className="text-stone-800">[기기 연동 🔄]</strong> 버튼을 누릅니다.</p>
+                    <p>3. 핸드폰에서 가입했던 이메일(<strong className="text-stone-800">{userEmail}</strong>)과 비밀번호로 <strong className="text-[#4E9F57]">로그인</strong>하시면 태블릿에서도 동일한 독서 통장이 바로 나타납니다!</p>
                   </div>
 
                   <div className="flex justify-between items-center pt-2">
-                    <span className="text-[11px] font-sans text-stone-400">안전하게 기기를 관리해 보세요</span>
+                    <span className="text-[11px] font-sans text-stone-400">안전하게 계정을 관리해 보세요</span>
                     <button
                       onClick={onLogout}
                       className="px-4 py-2 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-xl font-gaegu text-base font-bold transition-all flex items-center gap-1.5 cursor-pointer border border-rose-100"
