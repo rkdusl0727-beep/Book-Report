@@ -8,8 +8,14 @@ async function startServer() {
   const PORT = 3000;
 
   // support larger payloads because children might record voice or take pictures
-  app.use(express.json({ limit: '30mb' }));
-  app.use(express.urlencoded({ limit: '30mb', extended: true }));
+  app.use(express.json({ limit: '50mb' }));
+  app.use(express.urlencoded({ limit: '50mb', extended: true }));
+
+  // Global exception handling middleware to prevent server crashes under high traffic or unexpected payloads
+  app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    console.error("[Server Defense] Unhandled Error Caught:", err);
+    res.status(500).json({ success: false, error: "서버 처리 중 일시적인 오류가 발생했습니다. 잠시 후 다시 시도해 주세요." });
+  });
 
   const STORE_FILE = path.join(process.cwd(), 'sync_store.json');
 
@@ -120,9 +126,31 @@ async function startServer() {
     }
   });
 
+  // Helper to merge book arrays safely filtering out deleted IDs
+  const mergeBookArrays = (existing: any[] = [], incoming: any[] = [], deletedIds: string[] = []): any[] => {
+    const deletedSet = new Set(deletedIds || []);
+    const map = new Map<string, any>();
+
+    // Add existing books unless deleted
+    (existing || []).forEach((b) => {
+      if (b && b.id && !deletedSet.has(b.id)) {
+        map.set(b.id, b);
+      }
+    });
+
+    // Add incoming books unless deleted (overwrites existing with same ID)
+    (incoming || []).forEach((b) => {
+      if (b && b.id && !deletedSet.has(b.id)) {
+        map.set(b.id, b);
+      }
+    });
+
+    return Array.from(map.values());
+  };
+
   // API Route: Auto-Sync save
   app.post("/api/auth/save", (req, res) => {
-    const { email, books, ownerName, ownerTitle } = req.body;
+    const { email, books, deletedIds, ownerName, ownerTitle } = req.body;
     if (!email) {
       return res.status(400).json({ success: false, error: 'Missing email' });
     }
@@ -134,13 +162,19 @@ async function startServer() {
       return res.status(404).json({ success: false, error: 'User not found' });
     }
 
-    users[trimmedEmail].books = books || [];
+    const currentBooks = users[trimmedEmail].books || [];
+    // If incoming is explicitly empty array and no deletedIds, clear it. Otherwise, merge.
+    const finalBooks = (Array.isArray(books) && books.length === 0 && (!deletedIds || deletedIds.length === 0))
+      ? []
+      : mergeBookArrays(currentBooks, books || [], deletedIds || []);
+
+    users[trimmedEmail].books = finalBooks;
     users[trimmedEmail].ownerName = ownerName || users[trimmedEmail].ownerName;
     users[trimmedEmail].ownerTitle = ownerTitle || users[trimmedEmail].ownerTitle;
     users[trimmedEmail].updatedAt = new Date().toISOString();
 
     writeUsersStore(users);
-    res.json({ success: true });
+    res.json({ success: true, count: finalBooks.length });
   });
 
   // API Route: Create new sync code
@@ -180,7 +214,7 @@ async function startServer() {
 
   // API Route: Save progress for code
   app.post("/api/sync/save", (req, res) => {
-    const { syncCode, books, ownerName, ownerTitle } = req.body;
+    const { syncCode, books, deletedIds, ownerName, ownerTitle } = req.body;
     if (!syncCode) {
       return res.status(400).json({ success: false, error: 'Missing syncCode' });
     }
@@ -188,15 +222,20 @@ async function startServer() {
     const store = readStore();
     const upperCode = String(syncCode).toUpperCase().trim();
     
+    const currentBooks = store[upperCode]?.books || [];
+    const finalBooks = (Array.isArray(books) && books.length === 0 && (!deletedIds || deletedIds.length === 0))
+      ? []
+      : mergeBookArrays(currentBooks, books || [], deletedIds || []);
+
     store[upperCode] = {
-      books: books || [],
-      ownerName: ownerName || '이가연',
-      ownerTitle: ownerTitle || '반짝반짝',
+      books: finalBooks,
+      ownerName: ownerName || store[upperCode]?.ownerName || '이가연',
+      ownerTitle: ownerTitle || store[upperCode]?.ownerTitle || '반짝반짝',
       updatedAt: new Date().toISOString()
     };
     
     writeStore(store);
-    res.json({ success: true });
+    res.json({ success: true, count: finalBooks.length });
   });
 
   // API Route: Load progress for code

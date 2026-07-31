@@ -12,20 +12,19 @@ const getLocalStorage = (): Storage | null => {
     return cachedStorage;
   }
   try {
-    if (typeof window !== 'undefined' && 'localStorage' in window) {
-      // Some strict environments throw a SecurityError simply by accessing window.localStorage
+    if (typeof window !== 'undefined') {
+      // Check if window.localStorage is accessible without throwing SecurityError
+      const testKey = '__storage_test_key__';
       const storage = window.localStorage;
-      if (storage) {
-        // Double check it's usable by doing a tiny test
-        const testKey = '__storage_test__';
-        storage.setItem(testKey, testKey);
+      if (storage && typeof storage.setItem === 'function') {
+        storage.setItem(testKey, '1');
         storage.removeItem(testKey);
         cachedStorage = storage;
-        console.log('[Storage Defense] LocalStorage is fully supported and verified.');
+        console.log('[Storage Defense] LocalStorage verified and accessible.');
       }
     }
   } catch (e) {
-    console.warn('[Storage Defense] LocalStorage is not accessible (e.g. secure sandboxed iframe, private browsing). Using memory fallback safely.', e);
+    console.warn('[Storage Defense] LocalStorage is blocked or inaccessible (e.g. private mode, cookies disabled, iframe sandbox). Operating gracefully with In-Memory Storage.', e);
     cachedStorage = null;
   }
   isStorageChecked = true;
@@ -39,19 +38,19 @@ export const safeStorage = {
       if (storage) {
         const value = storage.getItem(key);
         if (value !== null) {
-          // Sync to memory dictionary to keep them aligned
+          // Keep in-memory cache synchronized
           memoryStorageDict[key] = value;
           return value;
         }
       }
     } catch (e) {
-      console.warn(`[Storage Defense] safeStorage.getItem failed for key "${key}". Using memory fallback.`, e);
+      console.warn(`[Storage Defense] safeStorage.getItem error for "${key}". Falling back to memory storage.`, e);
     }
     return memoryStorageDict[key] || null;
   },
 
   setItem: (key: string, value: string): boolean => {
-    // Sync to memory dictionary first to ensure it's always available instantly
+    // 1. Always update memory storage first to guarantee instant availability in JS state
     memoryStorageDict[key] = value;
     try {
       const storage = getLocalStorage();
@@ -59,8 +58,9 @@ export const safeStorage = {
         storage.setItem(key, value);
         return true;
       }
-    } catch (e) {
-      console.warn(`[Storage Defense] safeStorage.setItem failed for key "${key}". Saved to memory instead.`, e);
+    } catch (e: any) {
+      // Catch QuotaExceededError or SecurityError
+      console.warn(`[Storage Defense] safeStorage.setItem unable to persist to browser disk for "${key}" (Quota or Security restriction). Retained safely in memory.`, e);
     }
     return false;
   },
@@ -74,14 +74,34 @@ export const safeStorage = {
         return true;
       }
     } catch (e) {
-      console.warn(`[Storage Defense] safeStorage.removeItem failed for key "${key}". Removed from memory.`, e);
+      console.warn(`[Storage Defense] safeStorage.removeItem error for "${key}". Removed from memory safely.`, e);
+    }
+    return false;
+  },
+
+  clear: (): boolean => {
+    Object.keys(memoryStorageDict).forEach(k => delete memoryStorageDict[k]);
+    try {
+      const storage = getLocalStorage();
+      if (storage) {
+        storage.clear();
+        return true;
+      }
+    } catch (e) {
+      console.warn(`[Storage Defense] safeStorage.clear error. Cleared memory store safely.`, e);
     }
     return false;
   }
 };
 
 export const saveBooksToStorage = (books: BookRecord[]): boolean => {
-  return safeStorage.setItem('digital_reading_books', JSON.stringify(books));
+  try {
+    const validBooks = Array.isArray(books) ? books.filter(b => b && typeof b === 'object' && b.id) : [];
+    return safeStorage.setItem('digital_reading_books', JSON.stringify(validBooks));
+  } catch (e) {
+    console.error('[Storage Defense] saveBooksToStorage stringify failed. Safe fallback activated.', e);
+    return false;
+  }
 };
 
 export const loadBooksFromStorage = (): BookRecord[] => {
@@ -91,53 +111,66 @@ export const loadBooksFromStorage = (): BookRecord[] => {
       const parsed = JSON.parse(data);
       if (Array.isArray(parsed)) {
         // Prevent crashes by ensuring only valid BookRecord objects are returned
-        return parsed.filter(item => item && typeof item === 'object' && 'title' in item) as BookRecord[];
+        return parsed.filter(item => item && typeof item === 'object' && typeof item.title === 'string') as BookRecord[];
       }
     }
   } catch (e) {
-    console.error('[Storage Defense] Failed to parse books data. Returning empty list.', e);
+    console.error('[Storage Defense] Failed to parse books data. Returning empty list safely without crash.', e);
   }
   return [];
 };
 
 /**
- * Compresses an image file to a maximum width of 600px and returns a Base64 string.
- * This keeps the LocalStorage usage small and prevents crashes.
+ * Compresses an image file to a maximum width of 450px and returns a compact Base64 string.
+ * Keeps memory/storage usage ultra-small (~30KB per image) and prevents QuotaExceededError on mobile/tablet devices.
  */
-export const compressAndConvertToBase64 = (file: File, maxWidth = 600): Promise<string> => {
-  return new Promise((resolve, reject) => {
+export const compressAndConvertToBase64 = (file: File, maxWidth = 450): Promise<string> => {
+  return new Promise((resolve) => {
+    if (!file) {
+      resolve('');
+      return;
+    }
     const reader = new FileReader();
     reader.readAsDataURL(file);
     reader.onload = (event) => {
+      const result = event.target?.result as string;
+      if (!result) {
+        resolve('');
+        return;
+      }
       const img = new Image();
-      img.src = event.target?.result as string;
+      img.src = result;
       img.onload = () => {
-        const canvas = document.createElement('canvas');
-        let width = img.width;
-        let height = img.height;
+        try {
+          const canvas = document.createElement('canvas');
+          let width = img.width;
+          let height = img.height;
 
-        if (width > maxWidth) {
-          height = Math.round((height * maxWidth) / width);
-          width = maxWidth;
+          if (width > maxWidth) {
+            height = Math.round((height * maxWidth) / width);
+            width = maxWidth;
+          }
+
+          canvas.width = width;
+          canvas.height = height;
+
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            resolve(img.src);
+            return;
+          }
+
+          ctx.drawImage(img, 0, 0, width, height);
+          const compressedBase64 = canvas.toDataURL('image/jpeg', 0.55);
+          resolve(compressedBase64);
+        } catch (e) {
+          console.warn('[Image Defense] Compression canvas failed, returning image safely.', e);
+          resolve(img.src);
         }
-
-        canvas.width = width;
-        canvas.height = height;
-
-        const ctx = canvas.getContext('2d');
-        if (!ctx) {
-          resolve(img.src); // Fallback to raw base64 if canvas context is missing
-          return;
-        }
-
-        ctx.drawImage(img, 0, 0, width, height);
-        // Compress image to jpeg format with 0.7 quality to save substantial space
-        const compressedBase64 = canvas.toDataURL('image/jpeg', 0.7);
-        resolve(compressedBase64);
       };
-      img.onerror = (err) => reject(err);
+      img.onerror = () => resolve(result);
     };
-    reader.onerror = (err) => reject(err);
+    reader.onerror = () => resolve('');
   });
 };
 
@@ -145,11 +178,16 @@ export const compressAndConvertToBase64 = (file: File, maxWidth = 600): Promise<
  * Formats standard Javascript Date into a friendly Korean kid-friendly style.
  */
 export const getKoreanFriendlyDate = (): string => {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = now.getMonth() + 1;
-  const date = now.getDate();
-  const days = ['일', '월', '화', '수', '목', '금', '토'];
-  const day = days[now.getDay()];
-  return `${year}년 ${month}월 ${date}일 (${day})`;
+  try {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = now.getMonth() + 1;
+    const date = now.getDate();
+    const days = ['일', '월', '화', '수', '목', '금', '토'];
+    const day = days[now.getDay()];
+    return `${year}년 ${month}월 ${date}일 (${day})`;
+  } catch {
+    return '오늘';
+  }
 };
+
