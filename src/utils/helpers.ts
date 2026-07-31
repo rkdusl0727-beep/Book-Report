@@ -35,13 +35,30 @@ export const safeStorage = {
   getItem: (key: string): string | null => {
     try {
       const storage = getLocalStorage();
-      if (storage) {
-        const value = storage.getItem(key);
-        if (value !== null) {
-          // Keep in-memory cache synchronized
-          memoryStorageDict[key] = value;
-          return value;
+      const diskVal = storage ? storage.getItem(key) : null;
+      const memVal = memoryStorageDict[key] || null;
+
+      // Special lossless protection for book records array
+      if (key === 'digital_reading_books' && (diskVal || memVal)) {
+        let diskBooks: BookRecord[] = [];
+        let memBooks: BookRecord[] = [];
+        try { if (diskVal) diskBooks = JSON.parse(diskVal); } catch {}
+        try { if (memVal) memBooks = JSON.parse(memVal); } catch {}
+
+        if (Array.isArray(diskBooks) && Array.isArray(memBooks) && (diskBooks.length > 0 || memBooks.length > 0)) {
+          const map = new Map<string, BookRecord>();
+          diskBooks.forEach(b => { if (b && b.id) map.set(b.id, b); });
+          memBooks.forEach(b => { if (b && b.id) map.set(b.id, b); });
+          const merged = Array.from(map.values());
+          const mergedStr = JSON.stringify(merged);
+          memoryStorageDict[key] = mergedStr;
+          return mergedStr;
         }
+      }
+
+      if (diskVal !== null) {
+        memoryStorageDict[key] = diskVal;
+        return diskVal;
       }
     } catch (e) {
       console.warn(`[Storage Defense] safeStorage.getItem error for "${key}". Falling back to memory storage.`, e);

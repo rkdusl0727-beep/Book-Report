@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react';
 import { BookRecord } from '../types';
-import { Star, Play, Pause, Trash2, Heart, Search, HelpCircle, AlertCircle, Sparkles, BookOpen, Smile, Sprout } from 'lucide-react';
+import { Star, Play, Pause, Trash2, Heart, Search, HelpCircle, AlertCircle, Sparkles, BookOpen, Smile, Sprout, Award } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import CuteModal from './CuteModal';
 

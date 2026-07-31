@@ -64,26 +64,34 @@ export default function CelebrationModal({
 }: CelebrationModalProps) {
   // Determine dynamic award title and customized text depending on bookCount milestone
   const getAwardDetails = (count: number) => {
-    if (count >= 30) {
-      const milestoneLabel = count === 30 ? '열매 등급 🍎' : `빛나는 완독 마스터 등급 ⭐ (${count}권)`;
+    const safeCount = Math.max(0, Number(count) || 0);
+    if (safeCount >= 30) {
+      const milestoneLabel = safeCount === 30 ? '열매 등급 🍎' : `빛나는 완독 마스터 등급 ⭐ (${safeCount}권)`;
       return {
-        title: count === 30 ? '독서 열매 대장상' : '초특급 독서 마스터상',
+        title: safeCount === 30 ? '독서 열매 대장상' : '초특급 독서 마스터상',
         themeColor: '#E53935',
         description: `주렁주렁 탐스러운 열매처럼 알찬 지식과 슬기를 가득 채우며 열심히 책을 저축하여, 마침내 멋진 [${milestoneLabel}]으로 당당하게 업그레이드되었습니다!`
       };
     }
-    if (count >= 20) {
+    if (safeCount >= 20) {
       return {
         title: '독서 나무 대장상',
         themeColor: '#2E7D32',
         description: '든든하게 뻗어가는 푸른 나무처럼 깊은 생각과 마음의 키를 한 뼘 더 키우며 열심히 책을 저축하여, 멋진 [나무 등급 🌳]으로 당당하게 업그레이드되었습니다!'
       };
     }
-    // 10 books or default Sprout
+    if (safeCount >= 10) {
+      return {
+        title: '독서 새싹 대장상',
+        themeColor: '#4CAF50',
+        description: '무럭무럭 자라나는 초록 새싹처럼 고운 마음과 지혜를 쑥쑥 키우며 열심히 책을 저축하여, 드디어 꿈이 자라는 [새싹 등급 🌱]으로 당당하게 업그레이드되었습니다!'
+      };
+    }
+    // count < 10 (0~9 books)
     return {
-      title: '독서 새싹 대장상',
-      themeColor: '#4CAF50',
-      description: '무럭무럭 자라나는 초록 새싹처럼 고운 마음과 지혜를 쑥쑥 키우며 열심히 책을 저축하여, 드디어 꿈이 자라는 [새싹 등급 🌱]으로 당당하게 업그레이드되었습니다!'
+      title: '꿈나무 독서 시작상',
+      themeColor: '#8D6E63',
+      description: '꿈을 품은 소중한 씨앗처럼 두근두근 지혜의 첫 책 저축을 시작하며 예쁜 생각을 차곡차곡 모아가는, 자랑스러운 [씨앗 등급 🌱]으로 마음 깊이 응원합니다!'
     };
   };
 

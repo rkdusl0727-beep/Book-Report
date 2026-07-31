@@ -208,14 +208,31 @@ export default function App() {
     fetchLatestFromCloud(true);
   }, []);
 
-  // Periodic cloud poll + fetch on tab focus / visibility change
+  // Periodic cloud poll + fetch on tab focus / visibility change / pageshow / popstate (back navigation defense)
   useEffect(() => {
     const handleFocus = () => {
+      // 1. Instantly merge disk & in-memory state on navigation/focus to prevent UI drops
+      const currentLocal = loadBooksFromStorage();
+      const currentMemory = booksRef.current;
+      const merged = mergeBooks([], currentLocal, currentMemory);
+      setBooks(merged);
+
+      // 2. Fetch latest from cloud with lossless 3-way merging
       fetchLatestFromCloud(true);
     };
 
+    const handleFlushState = () => {
+      if (booksRef.current && booksRef.current.length > 0) {
+        saveBooksToStorage(booksRef.current);
+      }
+    };
+
     window.addEventListener('focus', handleFocus);
+    window.addEventListener('pageshow', handleFocus);
+    window.addEventListener('popstate', handleFocus);
     document.addEventListener('visibilitychange', handleFocus);
+    window.addEventListener('pagehide', handleFlushState);
+    window.addEventListener('beforeunload', handleFlushState);
 
     // Poll every 10 seconds if logged in or using sync code
     const interval = setInterval(() => {
@@ -224,7 +241,11 @@ export default function App() {
 
     return () => {
       window.removeEventListener('focus', handleFocus);
+      window.removeEventListener('pageshow', handleFocus);
+      window.removeEventListener('popstate', handleFocus);
       document.removeEventListener('visibilitychange', handleFocus);
+      window.removeEventListener('pagehide', handleFlushState);
+      window.removeEventListener('beforeunload', handleFlushState);
       clearInterval(interval);
     };
   }, [userEmail, syncCode]);

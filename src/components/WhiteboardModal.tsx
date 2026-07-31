@@ -302,7 +302,29 @@ export default function WhiteboardModal({
   const handleSave = () => {
     const canvas = canvasRef.current;
     if (canvas) {
-      const dataUrl = canvas.toDataURL('image/png');
+      try {
+        // Compress canvas drawing to compact JPEG (~15KB) so mobile/tablet LocalStorage never runs out of space
+        const targetWidth = 360;
+        const scale = targetWidth / canvas.width;
+        const targetHeight = Math.round(canvas.height * scale);
+
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = targetWidth;
+        tempCanvas.height = targetHeight;
+        const tempCtx = tempCanvas.getContext('2d');
+        if (tempCtx) {
+          tempCtx.fillStyle = '#FFFFFF';
+          tempCtx.fillRect(0, 0, targetWidth, targetHeight);
+          tempCtx.drawImage(canvas, 0, 0, targetWidth, targetHeight);
+          const compressedDataUrl = tempCanvas.toDataURL('image/jpeg', 0.6);
+          onSave(compressedDataUrl);
+          onClose();
+          return;
+        }
+      } catch (e) {
+        console.warn('Canvas compression failed, falling back safely:', e);
+      }
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
       onSave(dataUrl);
       onClose();
     }

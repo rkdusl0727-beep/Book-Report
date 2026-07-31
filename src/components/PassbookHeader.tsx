@@ -278,7 +278,7 @@ export default function PassbookHeader({
         {/* Real-time Savings visualizer with custom cumulative journey to 30 */}
         <div className="bg-white px-5 py-4.5 rounded-3xl border-2 border-[#E6D5B8] shadow-sm flex flex-col gap-3.5 md:max-w-md w-full order-2 md:order-none">
           {/* Circular counts */}
-          <div className="flex items-center justify-between gap-2 flex-wrap min-[380px]:flex-nowrap">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
             <div className="flex items-center gap-1.5 shrink-0">
               <span className="font-gaegu text-xl text-[#5D5443] font-bold whitespace-nowrap shrink-0">누적 저축</span>
               <div className="flex items-baseline gap-0.5 whitespace-nowrap shrink-0">
