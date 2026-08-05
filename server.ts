@@ -126,7 +126,7 @@ async function startServer() {
     }
   });
 
-  // Helper to merge book arrays safely filtering out deleted IDs
+  // Helper to merge book arrays safely filtering out deleted IDs and preserving drawings/reviews
   const mergeBookArrays = (existing: any[] = [], incoming: any[] = [], deletedIds: string[] = []): any[] => {
     const deletedSet = new Set(deletedIds || []);
     const map = new Map<string, any>();
@@ -138,10 +138,19 @@ async function startServer() {
       }
     });
 
-    // Add incoming books unless deleted (overwrites existing with same ID)
+    // Add incoming books unless deleted (merges existing with same ID)
     (incoming || []).forEach((b) => {
       if (b && b.id && !deletedSet.has(b.id)) {
-        map.set(b.id, b);
+        const prev = map.get(b.id) || {};
+        map.set(b.id, {
+          ...prev,
+          ...b,
+          // Preserve scene image, voice record, cover image and feeling if present in prev but missing in incoming
+          sceneImage: b.sceneImage || prev.sceneImage || null,
+          voiceRecord: b.voiceRecord || prev.voiceRecord || null,
+          coverImage: b.coverImage || prev.coverImage || null,
+          feeling: b.feeling || prev.feeling || '',
+        });
       }
     });
 
@@ -150,7 +159,7 @@ async function startServer() {
 
   // API Route: Auto-Sync save
   app.post("/api/auth/save", (req, res) => {
-    const { email, books, deletedIds, ownerName, ownerTitle } = req.body;
+    const { email, books, deletedIds, ownerName, ownerTitle, isClearAll } = req.body;
     if (!email) {
       return res.status(400).json({ success: false, error: 'Missing email' });
     }
@@ -163,10 +172,17 @@ async function startServer() {
     }
 
     const currentBooks = users[trimmedEmail].books || [];
-    // If incoming is explicitly empty array and no deletedIds, clear it. Otherwise, merge.
-    const finalBooks = (Array.isArray(books) && books.length === 0 && (!deletedIds || deletedIds.length === 0))
-      ? []
-      : mergeBookArrays(currentBooks, books || [], deletedIds || []);
+    
+    // Only wipe if user explicitly invoked "Clear All" in UI
+    let finalBooks: any[] = [];
+    if (isClearAll) {
+      finalBooks = [];
+    } else if (Array.isArray(books) && books.length === 0 && (!deletedIds || deletedIds.length === 0)) {
+      // Do NOT wipe existing books on accidental empty payloads
+      finalBooks = currentBooks;
+    } else {
+      finalBooks = mergeBookArrays(currentBooks, books || [], deletedIds || []);
+    }
 
     users[trimmedEmail].books = finalBooks;
     users[trimmedEmail].ownerName = ownerName || users[trimmedEmail].ownerName;
@@ -214,7 +230,7 @@ async function startServer() {
 
   // API Route: Save progress for code
   app.post("/api/sync/save", (req, res) => {
-    const { syncCode, books, deletedIds, ownerName, ownerTitle } = req.body;
+    const { syncCode, books, deletedIds, ownerName, ownerTitle, isClearAll } = req.body;
     if (!syncCode) {
       return res.status(400).json({ success: false, error: 'Missing syncCode' });
     }
@@ -223,9 +239,15 @@ async function startServer() {
     const upperCode = String(syncCode).toUpperCase().trim();
     
     const currentBooks = store[upperCode]?.books || [];
-    const finalBooks = (Array.isArray(books) && books.length === 0 && (!deletedIds || deletedIds.length === 0))
-      ? []
-      : mergeBookArrays(currentBooks, books || [], deletedIds || []);
+    
+    let finalBooks: any[] = [];
+    if (isClearAll) {
+      finalBooks = [];
+    } else if (Array.isArray(books) && books.length === 0 && (!deletedIds || deletedIds.length === 0)) {
+      finalBooks = currentBooks;
+    } else {
+      finalBooks = mergeBookArrays(currentBooks, books || [], deletedIds || []);
+    }
 
     store[upperCode] = {
       books: finalBooks,

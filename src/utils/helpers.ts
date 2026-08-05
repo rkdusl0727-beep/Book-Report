@@ -114,10 +114,76 @@ export const safeStorage = {
 export const saveBooksToStorage = (books: BookRecord[]): boolean => {
   try {
     const validBooks = Array.isArray(books) ? books.filter(b => b && typeof b === 'object' && b.id) : [];
-    return safeStorage.setItem('digital_reading_books', JSON.stringify(validBooks));
+    const jsonStr = JSON.stringify(validBooks);
+    const success = safeStorage.setItem('digital_reading_books', jsonStr);
+
+    // Asynchronously back up to IndexedDB to guarantee storage even if localStorage hits quota
+    saveBooksToIDB(validBooks);
+    return success;
   } catch (e) {
     console.error('[Storage Defense] saveBooksToStorage stringify failed. Safe fallback activated.', e);
     return false;
+  }
+};
+
+// IndexedDB unlimited quota storage layer for mobile/tablet browsers
+const DB_NAME = 'reading_passbook_idb';
+const STORE_NAME = 'books_store';
+
+const getIDB = (): Promise<IDBDatabase | null> => {
+  return new Promise((resolve) => {
+    if (typeof window === 'undefined' || !window.indexedDB) {
+      resolve(null);
+      return;
+    }
+    try {
+      const request = window.indexedDB.open(DB_NAME, 1);
+      request.onupgradeneeded = () => {
+        const db = request.result;
+        if (!db.objectStoreNames.contains(STORE_NAME)) {
+          db.createObjectStore(STORE_NAME);
+        }
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => resolve(null);
+    } catch (e) {
+      resolve(null);
+    }
+  });
+};
+
+export const saveBooksToIDB = async (books: BookRecord[]): Promise<boolean> => {
+  try {
+    const db = await getIDB();
+    if (!db) return false;
+    return new Promise((resolve) => {
+      const tx = db.transaction(STORE_NAME, 'readwrite');
+      const store = tx.objectStore(STORE_NAME);
+      const req = store.put(books, 'digital_reading_books');
+      req.onsuccess = () => resolve(true);
+      req.onerror = () => resolve(false);
+    });
+  } catch (e) {
+    return false;
+  }
+};
+
+export const loadBooksFromIDB = async (): Promise<BookRecord[]> => {
+  try {
+    const db = await getIDB();
+    if (!db) return [];
+    return new Promise((resolve) => {
+      const tx = db.transaction(STORE_NAME, 'readonly');
+      const store = tx.objectStore(STORE_NAME);
+      const req = store.get('digital_reading_books');
+      req.onsuccess = () => {
+        const val = req.result;
+        resolve(Array.isArray(val) ? val : []);
+      };
+      req.onerror = () => resolve([]);
+    });
+  } catch (e) {
+    return [];
   }
 };
 

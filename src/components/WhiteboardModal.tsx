@@ -243,9 +243,12 @@ export default function WhiteboardModal({
         isDrawingRef.current = false;
         setIsDrawing(false);
 
-        // Save current stroke-finished state to history
+        // Save current stroke-finished state to history (cap at 10 to conserve mobile RAM)
         const dataUrl = canvas.toDataURL('image/png');
         historyRef.current.push(dataUrl);
+        if (historyRef.current.length > 10) {
+          historyRef.current.shift();
+        }
         setHistory([...historyRef.current]);
       }
     };

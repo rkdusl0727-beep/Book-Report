@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { BookRecord, ActiveTab } from './types';
-import { loadBooksFromStorage, saveBooksToStorage, safeStorage } from './utils/helpers';
+import { loadBooksFromStorage, saveBooksToStorage, safeStorage, loadBooksFromIDB } from './utils/helpers';
 import PassbookHeader from './components/PassbookHeader';
 import BookDepositForm from './components/BookDepositForm';
 import PassbookLedger from './components/PassbookLedger';
@@ -79,31 +79,37 @@ export default function App() {
     }
   };
 
+  const mergeBookRecords = (a: BookRecord, b: BookRecord): BookRecord => {
+    return {
+      ...a,
+      ...b,
+      // Retain richest properties across device states
+      sceneImage: b.sceneImage || a.sceneImage || null,
+      voiceRecord: b.voiceRecord || a.voiceRecord || null,
+      coverImage: b.coverImage || a.coverImage || null,
+      feeling: b.feeling || a.feeling || '',
+      rating: b.rating || a.rating || 5,
+    };
+  };
+
   // Helper to merge local, memory and cloud books safely without duplicates or data loss
   const mergeBooks = (cloudBooks: BookRecord[], localBooks: BookRecord[], memoryBooks: BookRecord[] = []): BookRecord[] => {
     const deletedIds = getDeletedBookIds();
     const map = new Map<string, BookRecord>();
 
-    // 1. Add cloud books (filtering out manually deleted books)
-    (cloudBooks || []).forEach((b) => {
-      if (b && b.id && !deletedIds.includes(b.id)) {
+    const processBook = (b: BookRecord) => {
+      if (!b || !b.id || deletedIds.includes(b.id)) return;
+      if (map.has(b.id)) {
+        const existing = map.get(b.id)!;
+        map.set(b.id, mergeBookRecords(existing, b));
+      } else {
         map.set(b.id, b);
       }
-    });
+    };
 
-    // 2. Add local stored books (preserving books created offline or before sync)
-    (localBooks || []).forEach((b) => {
-      if (b && b.id && !deletedIds.includes(b.id) && !map.has(b.id)) {
-        map.set(b.id, b);
-      }
-    });
-
-    // 3. Add live in-memory state books (ensuring recent unsaved/pending state is retained)
-    (memoryBooks || []).forEach((b) => {
-      if (b && b.id && !deletedIds.includes(b.id) && !map.has(b.id)) {
-        map.set(b.id, b);
-      }
-    });
+    (cloudBooks || []).forEach(processBook);
+    (localBooks || []).forEach(processBook);
+    (memoryBooks || []).forEach(processBook);
 
     return Array.from(map.values());
   };
@@ -182,30 +188,38 @@ export default function App() {
 
   // Load books, owner name & sync code from storage on mount + Cloud fetch
   useEffect(() => {
-    const loadedBooks = loadBooksFromStorage();
-    setBooks(loadedBooks);
+    const initStorage = async () => {
+      const loadedBooks = loadBooksFromStorage();
+      const idbBooks = await loadBooksFromIDB();
+      const mergedInitial = mergeBooks([], loadedBooks, idbBooks);
 
-    const storedName = safeStorage.getItem('digital_reading_owner_name');
-    const storedTitle = safeStorage.getItem('digital_reading_owner_title');
-    if (storedName) {
-      setOwnerName(storedName);
-    }
-    if (storedTitle) {
-      setOwnerTitle(storedTitle);
-    }
+      setBooks(mergedInitial);
+      saveBooksToStorage(mergedInitial);
 
-    const storedSyncCode = safeStorage.getItem('digital_reading_sync_code');
-    if (storedSyncCode) {
-      setSyncCode(storedSyncCode);
-    }
+      const storedName = safeStorage.getItem('digital_reading_owner_name');
+      const storedTitle = safeStorage.getItem('digital_reading_owner_title');
+      if (storedName) {
+        setOwnerName(storedName);
+      }
+      if (storedTitle) {
+        setOwnerTitle(storedTitle);
+      }
 
-    const storedEmail = safeStorage.getItem('digital_reading_user_email');
-    if (storedEmail) {
-      setUserEmail(storedEmail);
-    }
+      const storedSyncCode = safeStorage.getItem('digital_reading_sync_code');
+      if (storedSyncCode) {
+        setSyncCode(storedSyncCode);
+      }
 
-    // Initial cloud fetch on launch
-    fetchLatestFromCloud(true);
+      const storedEmail = safeStorage.getItem('digital_reading_user_email');
+      if (storedEmail) {
+        setUserEmail(storedEmail);
+      }
+
+      // Initial cloud fetch on launch
+      fetchLatestFromCloud(true);
+    };
+
+    initStorage();
   }, []);
 
   // Periodic cloud poll + fetch on tab focus / visibility change / pageshow / popstate (back navigation defense)
@@ -251,7 +265,14 @@ export default function App() {
   }, [userEmail, syncCode]);
 
   // Sync helper to push updates to the backend
-  const triggerAutoSync = (email: string | null, code: string | null, currentBooks: BookRecord[], currentName: string, currentTitle: string) => {
+  const triggerAutoSync = (
+    email: string | null,
+    code: string | null,
+    currentBooks: BookRecord[],
+    currentName: string,
+    currentTitle: string,
+    isClearAll = false
+  ) => {
     const deletedIds = getDeletedBookIds();
     // 1. Account sync (prioritized, no manual button needed!)
     if (email) {
@@ -263,7 +284,8 @@ export default function App() {
           books: currentBooks,
           deletedIds,
           ownerName: currentName,
-          ownerTitle: currentTitle
+          ownerTitle: currentTitle,
+          isClearAll
         })
       })
       .then(res => res.json())
@@ -287,7 +309,8 @@ export default function App() {
           books: currentBooks,
           deletedIds,
           ownerName: currentName,
-          ownerTitle: currentTitle
+          ownerTitle: currentTitle,
+          isClearAll
         })
       })
       .then(res => res.json())
@@ -536,7 +559,7 @@ export default function App() {
     books.forEach(b => addDeletedBookId(b.id));
     setBooks([]);
     saveBooksToStorage([]);
-    triggerAutoSync(userEmail, syncCode, [], ownerName, ownerTitle);
+    triggerAutoSync(userEmail, syncCode, [], ownerName, ownerTitle, true);
     showCustomAlert('초기화 완료', '독서 통장이 새 주인을 기다려요! 기록이 모두 비워졌습니다.', 'warning');
   };
 
