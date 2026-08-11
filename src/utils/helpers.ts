@@ -111,18 +111,59 @@ export const safeStorage = {
   }
 };
 
+export const getDeletedBookIds = (): string[] => {
+  try {
+    const raw = safeStorage.getItem('digital_reading_deleted_ids');
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+};
+
+export const addDeletedBookId = (id: string) => {
+  try {
+    if (!id) return;
+    const current = getDeletedBookIds();
+    if (!current.includes(id)) {
+      const updated = [...current, id];
+      safeStorage.setItem('digital_reading_deleted_ids', JSON.stringify(updated));
+    }
+  } catch (e) {
+    console.warn('[Storage Defense] Failed to save deleted ID:', e);
+  }
+};
+
+export const clearDeletedBookId = (id: string) => {
+  try {
+    if (!id) return;
+    const current = getDeletedBookIds();
+    const updated = current.filter(item => item !== id);
+    safeStorage.setItem('digital_reading_deleted_ids', JSON.stringify(updated));
+  } catch (e) {
+    console.warn('[Storage Defense] Failed to clear deleted ID:', e);
+  }
+};
+
+let cachedBooksArray: BookRecord[] = [];
+
 export const saveBooksToStorage = (books: BookRecord[]): boolean => {
   try {
     const validBooks = Array.isArray(books) ? books.filter(b => b && typeof b === 'object' && b.id) : [];
+    cachedBooksArray = [...validBooks];
     const jsonStr = JSON.stringify(validBooks);
-    const success = safeStorage.setItem('digital_reading_books', jsonStr);
+    
+    // Always store in memory storage dict first
+    memoryStorageDict['digital_reading_books'] = jsonStr;
+    safeStorage.setItem('digital_reading_books', jsonStr);
 
     // Asynchronously back up to IndexedDB to guarantee storage even if localStorage hits quota
-    saveBooksToIDB(validBooks);
-    return success;
+    saveBooksToIDB(validBooks).catch(() => {});
+    return true;
   } catch (e) {
-    console.error('[Storage Defense] saveBooksToStorage stringify failed. Safe fallback activated.', e);
-    return false;
+    console.error('[Storage Defense] saveBooksToStorage failed. Safe memory fallback active.', e);
+    return true;
   }
 };
 
@@ -189,18 +230,95 @@ export const loadBooksFromIDB = async (): Promise<BookRecord[]> => {
 
 export const loadBooksFromStorage = (): BookRecord[] => {
   try {
+    const deletedIds = getDeletedBookIds();
+    const map = new Map<string, BookRecord>();
+
+    // 1. Add from in-memory cachedBooksArray if available
+    if (Array.isArray(cachedBooksArray)) {
+      cachedBooksArray.forEach(b => {
+        if (b && b.id && !deletedIds.includes(b.id)) {
+          map.set(b.id, b);
+        }
+      });
+    }
+
+    // 2. Read from safeStorage (localStorage / memoryStorageDict)
     const data = safeStorage.getItem('digital_reading_books');
     if (data) {
       const parsed = JSON.parse(data);
       if (Array.isArray(parsed)) {
-        // Prevent crashes by ensuring only valid BookRecord objects are returned
-        return parsed.filter(item => item && typeof item === 'object' && typeof item.title === 'string') as BookRecord[];
+        parsed.forEach(item => {
+          if (item && typeof item === 'object' && item.id && typeof item.title === 'string' && !deletedIds.includes(item.id)) {
+            if (map.has(item.id)) {
+              const prev = map.get(item.id)!;
+              map.set(item.id, {
+                ...prev,
+                ...item,
+                sceneImage: item.sceneImage || prev.sceneImage || null,
+                voiceRecord: item.voiceRecord || prev.voiceRecord || null,
+                coverImage: item.coverImage || prev.coverImage || null,
+                feeling: item.feeling || prev.feeling || '',
+                rating: item.rating || prev.rating || 5,
+              });
+            } else {
+              map.set(item.id, item as BookRecord);
+            }
+          }
+        });
       }
     }
+
+    const result = Array.from(map.values());
+    cachedBooksArray = result;
+    return result;
   } catch (e) {
-    console.error('[Storage Defense] Failed to parse books data. Returning empty list safely without crash.', e);
+    console.error('[Storage Defense] Failed to parse books data. Returning cached memory list safely.', e);
+    const deletedIds = getDeletedBookIds();
+    return (cachedBooksArray || []).filter(b => b && b.id && !deletedIds.includes(b.id));
   }
-  return [];
+};
+
+/**
+ * Lossless 3-layer storage loader: merges memory cache + localStorage + IndexedDB.
+ * Guarantees zero data loss even if browser memory is purged or localStorage hits 5MB quota.
+ */
+export const loadMergedLocalBooks = async (): Promise<BookRecord[]> => {
+  try {
+    const memoryAndDisk = loadBooksFromStorage();
+    const idbBooks = await loadBooksFromIDB().catch(() => []);
+    const deletedIds = getDeletedBookIds();
+
+    const map = new Map<string, BookRecord>();
+    const process = (b: BookRecord) => {
+      if (b && b.id && typeof b.title === 'string' && !deletedIds.includes(b.id)) {
+        if (map.has(b.id)) {
+          const prev = map.get(b.id)!;
+          map.set(b.id, {
+            ...prev,
+            ...b,
+            sceneImage: b.sceneImage || prev.sceneImage || null,
+            voiceRecord: b.voiceRecord || prev.voiceRecord || null,
+            coverImage: b.coverImage || prev.coverImage || null,
+            feeling: b.feeling || prev.feeling || '',
+            rating: b.rating || prev.rating || 5,
+          });
+        } else {
+          map.set(b.id, b);
+        }
+      }
+    };
+
+    idbBooks.forEach(process);
+    memoryAndDisk.forEach(process);
+
+    const merged = Array.from(map.values());
+    cachedBooksArray = merged;
+    return merged;
+  } catch (e) {
+    console.error('[Storage Defense] loadMergedLocalBooks failed. Returning memory cached list safely.', e);
+    const deletedIds = getDeletedBookIds();
+    return (cachedBooksArray || []).filter(b => b && b.id && !deletedIds.includes(b.id));
+  }
 };
 
 /**

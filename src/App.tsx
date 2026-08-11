@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { BookRecord, ActiveTab } from './types';
-import { loadBooksFromStorage, saveBooksToStorage, safeStorage, loadBooksFromIDB } from './utils/helpers';
+import { loadBooksFromStorage, saveBooksToStorage, safeStorage, loadBooksFromIDB, loadMergedLocalBooks, getDeletedBookIds, addDeletedBookId, clearDeletedBookId } from './utils/helpers';
 import PassbookHeader from './components/PassbookHeader';
 import BookDepositForm from './components/BookDepositForm';
 import PassbookLedger from './components/PassbookLedger';
@@ -46,38 +46,6 @@ export default function App() {
     message: '',
     type: 'info'
   });
-
-  // Helper to manage deleted book IDs so deleted items stay deleted across devices
-  const getDeletedBookIds = (): string[] => {
-    try {
-      const raw = safeStorage.getItem('digital_reading_deleted_ids');
-      return raw ? JSON.parse(raw) : [];
-    } catch {
-      return [];
-    }
-  };
-
-  const addDeletedBookId = (id: string) => {
-    try {
-      const current = getDeletedBookIds();
-      if (!current.includes(id)) {
-        const updated = [...current, id];
-        safeStorage.setItem('digital_reading_deleted_ids', JSON.stringify(updated));
-      }
-    } catch (e) {
-      console.warn('Failed to save deleted ID:', e);
-    }
-  };
-
-  const clearDeletedBookId = (id: string) => {
-    try {
-      const current = getDeletedBookIds();
-      const updated = current.filter(item => item !== id);
-      safeStorage.setItem('digital_reading_deleted_ids', JSON.stringify(updated));
-    } catch (e) {
-      console.warn('Failed to clear deleted ID:', e);
-    }
-  };
 
   const mergeBookRecords = (a: BookRecord, b: BookRecord): BookRecord => {
     return {
@@ -126,7 +94,7 @@ export default function App() {
           const data = await res.json();
           if (data.success) {
             const cloudBooks: BookRecord[] = data.books || [];
-            const currentLocalBooks = loadBooksFromStorage();
+            const currentLocalBooks = await loadMergedLocalBooks();
             const memoryBooks = booksRef.current;
             const mergedBooks = mergeBooks(cloudBooks, currentLocalBooks, memoryBooks);
 
@@ -158,7 +126,7 @@ export default function App() {
           const data = await res.json();
           if (data.success) {
             const cloudBooks: BookRecord[] = data.books || [];
-            const currentLocalBooks = loadBooksFromStorage();
+            const currentLocalBooks = await loadMergedLocalBooks();
             const memoryBooks = booksRef.current;
             const mergedBooks = mergeBooks(cloudBooks, currentLocalBooks, memoryBooks);
 
@@ -189,9 +157,7 @@ export default function App() {
   // Load books, owner name & sync code from storage on mount + Cloud fetch
   useEffect(() => {
     const initStorage = async () => {
-      const loadedBooks = loadBooksFromStorage();
-      const idbBooks = await loadBooksFromIDB();
-      const mergedInitial = mergeBooks([], loadedBooks, idbBooks);
+      const mergedInitial = await loadMergedLocalBooks();
 
       setBooks(mergedInitial);
       saveBooksToStorage(mergedInitial);
@@ -224,9 +190,9 @@ export default function App() {
 
   // Periodic cloud poll + fetch on tab focus / visibility change / pageshow / popstate (back navigation defense)
   useEffect(() => {
-    const handleFocus = () => {
-      // 1. Instantly merge disk & in-memory state on navigation/focus to prevent UI drops
-      const currentLocal = loadBooksFromStorage();
+    const handleFocus = async () => {
+      // 1. Instantly merge disk, IndexedDB & in-memory state on navigation/focus to prevent UI drops
+      const currentLocal = await loadMergedLocalBooks();
       const currentMemory = booksRef.current;
       const merged = mergeBooks([], currentLocal, currentMemory);
       setBooks(merged);
@@ -367,7 +333,7 @@ export default function App() {
       }
       const data = await res.json();
       if (data.success) {
-        const currentLocalBooks = loadBooksFromStorage();
+        const currentLocalBooks = await loadMergedLocalBooks();
         const mergedBooks = mergeBooks(data.books || [], currentLocalBooks);
 
         setBooks(mergedBooks);
@@ -439,7 +405,7 @@ export default function App() {
         setUserEmail(data.email);
 
         // Merge any local offline books on this device with cloud books
-        const currentLocalBooks = loadBooksFromStorage();
+        const currentLocalBooks = await loadMergedLocalBooks();
         const mergedBooks = mergeBooks(data.books || [], currentLocalBooks);
 
         const finalName = data.ownerName || ownerName;
