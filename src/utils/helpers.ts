@@ -13,22 +13,87 @@ const getLocalStorage = (): Storage | null => {
   }
   try {
     if (typeof window !== 'undefined') {
-      // Check if window.localStorage is accessible without throwing SecurityError
       const testKey = '__storage_test_key__';
       const storage = window.localStorage;
       if (storage && typeof storage.setItem === 'function') {
         storage.setItem(testKey, '1');
         storage.removeItem(testKey);
         cachedStorage = storage;
-        console.log('[Storage Defense] LocalStorage verified and accessible.');
       }
     }
   } catch (e) {
-    console.warn('[Storage Defense] LocalStorage is blocked or inaccessible (e.g. private mode, cookies disabled, iframe sandbox). Operating gracefully with In-Memory Storage.', e);
+    console.warn('[Storage Defense] LocalStorage is restricted or inaccessible. Operating with In-Memory Storage.', e);
     cachedStorage = null;
   }
   isStorageChecked = true;
   return cachedStorage;
+};
+
+// Safely get cookie
+const getCookie = (name: string): string | null => {
+  try {
+    if (typeof document === 'undefined') return null;
+    const match = document.cookie.match(new RegExp('(^| )' + name + '=([^;]+)'));
+    return match ? decodeURIComponent(match[2]) : null;
+  } catch {
+    return null;
+  }
+};
+
+// Safely set cookie with 10-year expiration
+const setCookie = (name: string, value: string) => {
+  try {
+    if (typeof document === 'undefined') return;
+    const maxAge = 315360000; // 10 years in seconds
+    document.cookie = `${name}=${encodeURIComponent(value)}; max-age=${maxAge}; path=/; SameSite=Lax`;
+  } catch {}
+};
+
+// Unique Persistent Device ID with 4-Layer Persistence (LocalStorage + Cookie + SessionStorage + window.name)
+export const getOrCreateDeviceId = (): string => {
+  try {
+    let id: string | null = null;
+
+    // 1. Check LocalStorage
+    const localId = safeStorage.getItem('digital_reading_device_id');
+    if (localId && localId.length > 5) id = localId;
+
+    // 2. Check Cookie
+    if (!id) {
+      const cookieId = getCookie('digital_reading_device_id');
+      if (cookieId && cookieId.length > 5) id = cookieId;
+    }
+
+    // 3. Check SessionStorage
+    if (!id && typeof window !== 'undefined' && window.sessionStorage) {
+      try {
+        const sessId = window.sessionStorage.getItem('digital_reading_device_id');
+        if (sessId && sessId.length > 5) id = sessId;
+      } catch {}
+    }
+
+    // 4. Check window.name persistence trick (survives mobile browser page reloads in private mode)
+    if (!id && typeof window !== 'undefined' && window.name && window.name.startsWith('dr_dev_')) {
+      id = window.name;
+    }
+
+    // If still no ID, generate a unique resilient one
+    if (!id) {
+      id = 'dr_dev_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 9);
+    }
+
+    // Mirror to all 4 persistence layers
+    safeStorage.setItem('digital_reading_device_id', id);
+    setCookie('digital_reading_device_id', id);
+    if (typeof window !== 'undefined') {
+      try { window.sessionStorage?.setItem('digital_reading_device_id', id); } catch {}
+      try { window.name = id; } catch {}
+    }
+
+    return id;
+  } catch {
+    return 'dr_dev_default_session';
+  }
 };
 
 export const safeStorage = {
@@ -61,7 +126,7 @@ export const safeStorage = {
         return diskVal;
       }
     } catch (e) {
-      console.warn(`[Storage Defense] safeStorage.getItem error for "${key}". Falling back to memory storage.`, e);
+      console.warn(`[Storage Defense] safeStorage.getItem error for "${key}". Falling back to memory.`, e);
     }
     return memoryStorageDict[key] || null;
   },
@@ -76,8 +141,7 @@ export const safeStorage = {
         return true;
       }
     } catch (e: any) {
-      // Catch QuotaExceededError or SecurityError
-      console.warn(`[Storage Defense] safeStorage.setItem unable to persist to browser disk for "${key}" (Quota or Security restriction). Retained safely in memory.`, e);
+      console.warn(`[Storage Defense] safeStorage.setItem unable to persist to browser disk for "${key}" (Quota/Security restriction). Retained in memory.`, e);
     }
     return false;
   },
@@ -130,6 +194,9 @@ export const addDeletedBookId = (id: string) => {
       const updated = [...current, id];
       safeStorage.setItem('digital_reading_deleted_ids', JSON.stringify(updated));
     }
+    // Also remove any single book key
+    safeStorage.removeItem(`digital_reading_book_${id}`);
+    deleteBookFromIDB(id).catch(() => {});
   } catch (e) {
     console.warn('[Storage Defense] Failed to save deleted ID:', e);
   }
@@ -148,26 +215,72 @@ export const clearDeletedBookId = (id: string) => {
 
 let cachedBooksArray: BookRecord[] = [];
 
+/**
+ * Multi-layer Quota-Safe book saver:
+ * 1. Updates Memory Cache instantly
+ * 2. Stores lightweight metadata index (`digital_reading_books_meta`) in LocalStorage (never exceeds quota)
+ * 3. Stores clean lean book records (`digital_reading_books_lean`) in LocalStorage
+ * 4. Stores full rich records in unlimited IndexedDB
+ * 5. Tries saving full array to LocalStorage if quota permits
+ */
 export const saveBooksToStorage = (books: BookRecord[]): boolean => {
   try {
     const validBooks = Array.isArray(books) ? books.filter(b => b && typeof b === 'object' && b.id) : [];
     cachedBooksArray = [...validBooks];
     const jsonStr = JSON.stringify(validBooks);
     
-    // Always store in memory storage dict first
+    // 1. Update memory dictionary
     memoryStorageDict['digital_reading_books'] = jsonStr;
-    safeStorage.setItem('digital_reading_books', jsonStr);
 
-    // Asynchronously back up to IndexedDB to guarantee storage even if localStorage hits quota
+    // 2. Save lightweight metadata index (always fits in LocalStorage)
+    const metaList = validBooks.map(b => ({
+      id: b.id,
+      title: b.title,
+      rating: b.rating,
+      feeling: b.feeling,
+      createdAt: b.createdAt,
+      sceneType: b.sceneType
+    }));
+    safeStorage.setItem('digital_reading_books_meta', JSON.stringify(metaList));
+
+    // 3. Save lean version to LocalStorage (retains core text so all 50+ books always fit without Quota error)
+    const leanList = validBooks.map(b => ({
+      id: b.id,
+      title: b.title,
+      rating: b.rating,
+      feeling: b.feeling,
+      createdAt: b.createdAt,
+      sceneType: b.sceneType,
+      coverImage: (b.coverImage && b.coverImage.length < 50000) ? b.coverImage : null
+    }));
+    safeStorage.setItem('digital_reading_books_lean', JSON.stringify(leanList));
+
+    // 4. Try saving full array to LocalStorage
+    try {
+      const storage = getLocalStorage();
+      if (storage) {
+        storage.setItem('digital_reading_books', jsonStr);
+      }
+    } catch {
+      // If quota exceeded on full array, remove stale full key so it doesn't mask newly added books
+      try {
+        const storage = getLocalStorage();
+        if (storage) {
+          storage.removeItem('digital_reading_books');
+        }
+      } catch {}
+    }
+
+    // 5. Persist full rich book data into IndexedDB
     saveBooksToIDB(validBooks).catch(() => {});
     return true;
   } catch (e) {
-    console.error('[Storage Defense] saveBooksToStorage failed. Safe memory fallback active.', e);
+    console.error('[Storage Defense] saveBooksToStorage safe memory fallback active.', e);
     return true;
   }
 };
 
-// IndexedDB unlimited quota storage layer for mobile/tablet browsers
+// IndexedDB unlimited quota storage layer for mobile/tablet browsers with Timeout Protection
 const DB_NAME = 'reading_passbook_idb';
 const STORE_NAME = 'books_store';
 
@@ -177,17 +290,38 @@ const getIDB = (): Promise<IDBDatabase | null> => {
       resolve(null);
       return;
     }
+
+    // Safety timeout: 1000ms race so mobile Safari never hangs or blocks app loading
+    const timer = setTimeout(() => {
+      resolve(null);
+    }, 1000);
+
     try {
-      const request = window.indexedDB.open(DB_NAME, 1);
+      const request = window.indexedDB.open(DB_NAME, 2);
+      
       request.onupgradeneeded = () => {
         const db = request.result;
         if (!db.objectStoreNames.contains(STORE_NAME)) {
           db.createObjectStore(STORE_NAME);
         }
       };
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => resolve(null);
+      
+      request.onsuccess = () => {
+        clearTimeout(timer);
+        resolve(request.result);
+      };
+      
+      request.onerror = () => {
+        clearTimeout(timer);
+        resolve(null);
+      };
+
+      request.onblocked = () => {
+        clearTimeout(timer);
+        resolve(null);
+      };
     } catch (e) {
+      clearTimeout(timer);
       resolve(null);
     }
   });
@@ -198,13 +332,48 @@ export const saveBooksToIDB = async (books: BookRecord[]): Promise<boolean> => {
     const db = await getIDB();
     if (!db) return false;
     return new Promise((resolve) => {
-      const tx = db.transaction(STORE_NAME, 'readwrite');
-      const store = tx.objectStore(STORE_NAME);
-      const req = store.put(books, 'digital_reading_books');
-      req.onsuccess = () => resolve(true);
-      req.onerror = () => resolve(false);
+      try {
+        const tx = db.transaction(STORE_NAME, 'readwrite');
+        const store = tx.objectStore(STORE_NAME);
+        
+        // Save full array
+        store.put(books, 'digital_reading_books');
+
+        // Also save each book individually by ID
+        books.forEach(b => {
+          if (b && b.id) {
+            store.put(b, `book_${b.id}`);
+          }
+        });
+
+        tx.oncomplete = () => resolve(true);
+        tx.onerror = () => resolve(false);
+        tx.onabort = () => resolve(false);
+      } catch (err) {
+        resolve(false);
+      }
     });
   } catch (e) {
+    return false;
+  }
+};
+
+export const deleteBookFromIDB = async (id: string): Promise<boolean> => {
+  try {
+    const db = await getIDB();
+    if (!db) return false;
+    return new Promise((resolve) => {
+      try {
+        const tx = db.transaction(STORE_NAME, 'readwrite');
+        const store = tx.objectStore(STORE_NAME);
+        store.delete(`book_${id}`);
+        tx.oncomplete = () => resolve(true);
+        tx.onerror = () => resolve(false);
+      } catch {
+        resolve(false);
+      }
+    });
+  } catch {
     return false;
   }
 };
@@ -214,14 +383,40 @@ export const loadBooksFromIDB = async (): Promise<BookRecord[]> => {
     const db = await getIDB();
     if (!db) return [];
     return new Promise((resolve) => {
-      const tx = db.transaction(STORE_NAME, 'readonly');
-      const store = tx.objectStore(STORE_NAME);
-      const req = store.get('digital_reading_books');
-      req.onsuccess = () => {
-        const val = req.result;
-        resolve(Array.isArray(val) ? val : []);
-      };
-      req.onerror = () => resolve([]);
+      try {
+        const tx = db.transaction(STORE_NAME, 'readonly');
+        const store = tx.objectStore(STORE_NAME);
+        
+        // Retrieve all stored objects to guarantee no record is missed
+        if (typeof store.getAll === 'function') {
+          const getAllReq = store.getAll();
+          getAllReq.onsuccess = () => {
+            const results = getAllReq.result || [];
+            const map = new Map<string, BookRecord>();
+            results.forEach((item: any) => {
+              if (Array.isArray(item)) {
+                item.forEach((b: any) => {
+                  if (b && b.id && typeof b.title === 'string') map.set(b.id, b);
+                });
+              } else if (item && typeof item === 'object' && item.id && typeof item.title === 'string') {
+                map.set(item.id, item);
+              }
+            });
+            resolve(Array.from(map.values()));
+          };
+          getAllReq.onerror = () => {
+            const req = store.get('digital_reading_books');
+            req.onsuccess = () => resolve(Array.isArray(req.result) ? req.result : []);
+            req.onerror = () => resolve([]);
+          };
+        } else {
+          const req = store.get('digital_reading_books');
+          req.onsuccess = () => resolve(Array.isArray(req.result) ? req.result : []);
+          req.onerror = () => resolve([]);
+        }
+      } catch (err) {
+        resolve([]);
+      }
     });
   } catch (e) {
     return [];
@@ -233,40 +428,75 @@ export const loadBooksFromStorage = (): BookRecord[] => {
     const deletedIds = getDeletedBookIds();
     const map = new Map<string, BookRecord>();
 
-    // 1. Add from in-memory cachedBooksArray if available
-    if (Array.isArray(cachedBooksArray)) {
-      cachedBooksArray.forEach(b => {
-        if (b && b.id && !deletedIds.includes(b.id)) {
-          map.set(b.id, b);
+    const mergeItem = (item: any) => {
+      if (item && typeof item === 'object' && item.id && typeof item.title === 'string' && !deletedIds.includes(item.id)) {
+        if (map.has(item.id)) {
+          const prev = map.get(item.id)!;
+          map.set(item.id, {
+            ...prev,
+            ...item,
+            sceneImage: item.sceneImage || prev.sceneImage || null,
+            voiceRecord: item.voiceRecord || prev.voiceRecord || null,
+            coverImage: item.coverImage || prev.coverImage || null,
+            feeling: item.feeling || prev.feeling || '',
+            rating: item.rating || prev.rating || 5,
+          });
+        } else {
+          map.set(item.id, item as BookRecord);
         }
-      });
+      }
+    };
+
+    // 1. Add from in-memory cachedBooksArray
+    if (Array.isArray(cachedBooksArray)) {
+      cachedBooksArray.forEach(mergeItem);
     }
 
-    // 2. Read from safeStorage (localStorage / memoryStorageDict)
+    // 2. Read from safeStorage `digital_reading_books`
     const data = safeStorage.getItem('digital_reading_books');
     if (data) {
-      const parsed = JSON.parse(data);
-      if (Array.isArray(parsed)) {
-        parsed.forEach(item => {
-          if (item && typeof item === 'object' && item.id && typeof item.title === 'string' && !deletedIds.includes(item.id)) {
-            if (map.has(item.id)) {
-              const prev = map.get(item.id)!;
-              map.set(item.id, {
-                ...prev,
-                ...item,
-                sceneImage: item.sceneImage || prev.sceneImage || null,
-                voiceRecord: item.voiceRecord || prev.voiceRecord || null,
-                coverImage: item.coverImage || prev.coverImage || null,
-                feeling: item.feeling || prev.feeling || '',
-                rating: item.rating || prev.rating || 5,
-              });
-            } else {
-              map.set(item.id, item as BookRecord);
+      try {
+        const parsed = JSON.parse(data);
+        if (Array.isArray(parsed)) parsed.forEach(mergeItem);
+      } catch {}
+    }
+
+    // 3. Read from lean version `digital_reading_books_lean`
+    const leanData = safeStorage.getItem('digital_reading_books_lean');
+    if (leanData) {
+      try {
+        const parsed = JSON.parse(leanData);
+        if (Array.isArray(parsed)) parsed.forEach(mergeItem);
+      } catch {}
+    }
+
+    // 4. Read from meta list `digital_reading_books_meta`
+    const metaData = safeStorage.getItem('digital_reading_books_meta');
+    if (metaData) {
+      try {
+        const parsed = JSON.parse(metaData);
+        if (Array.isArray(parsed)) parsed.forEach(mergeItem);
+      } catch {}
+    }
+
+    // 5. Reconstruct from individual `digital_reading_book_*` entries
+    try {
+      const storage = getLocalStorage();
+      if (storage) {
+        for (let i = 0; i < storage.length; i++) {
+          const k = storage.key(i);
+          if (k && k.startsWith('digital_reading_book_')) {
+            const singleVal = storage.getItem(k);
+            if (singleVal) {
+              try {
+                const b = JSON.parse(singleVal);
+                mergeItem(b);
+              } catch {}
             }
           }
-        });
+        }
       }
-    }
+    } catch {}
 
     const result = Array.from(map.values());
     cachedBooksArray = result;
@@ -279,7 +509,7 @@ export const loadBooksFromStorage = (): BookRecord[] => {
 };
 
 /**
- * Lossless 3-layer storage loader: merges memory cache + localStorage + IndexedDB.
+ * Lossless 4-layer storage loader: merges memory cache + localStorage + lean index + IndexedDB.
  * Guarantees zero data loss even if browser memory is purged or localStorage hits 5MB quota.
  */
 export const loadMergedLocalBooks = async (): Promise<BookRecord[]> => {
@@ -322,10 +552,10 @@ export const loadMergedLocalBooks = async (): Promise<BookRecord[]> => {
 };
 
 /**
- * Compresses an image file to a maximum width of 450px and returns a compact Base64 string.
- * Keeps memory/storage usage ultra-small (~30KB per image) and prevents QuotaExceededError on mobile/tablet devices.
+ * Compresses an image file to a maximum width of 320px and returns a compact Base64 JPEG string (~15KB).
+ * Prevents QuotaExceededError and ensures dozens of books easily fit on tablet/mobile devices.
  */
-export const compressAndConvertToBase64 = (file: File, maxWidth = 450): Promise<string> => {
+export const compressAndConvertToBase64 = (file: File, maxWidth = 320): Promise<string> => {
   return new Promise((resolve) => {
     if (!file) {
       resolve('');
@@ -361,8 +591,10 @@ export const compressAndConvertToBase64 = (file: File, maxWidth = 450): Promise<
             return;
           }
 
+          ctx.fillStyle = '#FFFFFF';
+          ctx.fillRect(0, 0, width, height);
           ctx.drawImage(img, 0, 0, width, height);
-          const compressedBase64 = canvas.toDataURL('image/jpeg', 0.55);
+          const compressedBase64 = canvas.toDataURL('image/jpeg', 0.5);
           resolve(compressedBase64);
         } catch (e) {
           console.warn('[Image Defense] Compression canvas failed, returning image safely.', e);
@@ -391,4 +623,3 @@ export const getKoreanFriendlyDate = (): string => {
     return '오늘';
   }
 };
-

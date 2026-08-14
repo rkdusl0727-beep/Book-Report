@@ -277,6 +277,74 @@ async function startServer() {
     }
   });
 
+  // --- Anonymous Device Auto-Sync APIs (Zero Configuration Lossless Backup) ---
+  const readDevicesStore = () => {
+    const store = readStore();
+    if (!store.devices) {
+      store.devices = {};
+    }
+    return store.devices;
+  };
+
+  const writeDevicesStore = (devices: any) => {
+    const store = readStore();
+    store.devices = devices;
+    writeStore(store);
+  };
+
+  // API Route: Save progress for anonymous device ID
+  app.post("/api/device/save", (req, res) => {
+    const { deviceId, books, deletedIds, ownerName, ownerTitle, isClearAll } = req.body;
+    if (!deviceId) {
+      return res.status(400).json({ success: false, error: 'Missing deviceId' });
+    }
+
+    const trimmedId = String(deviceId).trim();
+    const devices = readDevicesStore();
+    const currentBooks = devices[trimmedId]?.books || [];
+
+    let finalBooks: any[] = [];
+    if (isClearAll) {
+      finalBooks = [];
+    } else if (Array.isArray(books) && books.length === 0 && (!deletedIds || deletedIds.length === 0)) {
+      finalBooks = currentBooks;
+    } else {
+      finalBooks = mergeBookArrays(currentBooks, books || [], deletedIds || []);
+    }
+
+    devices[trimmedId] = {
+      books: finalBooks,
+      ownerName: ownerName || devices[trimmedId]?.ownerName || '이가연',
+      ownerTitle: ownerTitle || devices[trimmedId]?.ownerTitle || '반짝반짝',
+      updatedAt: new Date().toISOString()
+    };
+
+    writeDevicesStore(devices);
+    res.json({ success: true, count: finalBooks.length });
+  });
+
+  // API Route: Load progress for anonymous device ID
+  app.get("/api/device/load/:deviceId", (req, res) => {
+    const trimmedId = String(req.params.deviceId).trim();
+    const devices = readDevicesStore();
+
+    if (devices[trimmedId]) {
+      res.json({
+        success: true,
+        books: devices[trimmedId].books || [],
+        ownerName: devices[trimmedId].ownerName || '이가연',
+        ownerTitle: devices[trimmedId].ownerTitle || '반짝반짝'
+      });
+    } else {
+      res.json({
+        success: true,
+        books: [],
+        ownerName: '이가연',
+        ownerTitle: '반짝반짝'
+      });
+    }
+  });
+
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({

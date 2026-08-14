@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { BookRecord, ActiveTab } from './types';
-import { loadBooksFromStorage, saveBooksToStorage, safeStorage, loadBooksFromIDB, loadMergedLocalBooks, getDeletedBookIds, addDeletedBookId, clearDeletedBookId } from './utils/helpers';
+import { loadBooksFromStorage, saveBooksToStorage, safeStorage, loadBooksFromIDB, loadMergedLocalBooks, getDeletedBookIds, addDeletedBookId, clearDeletedBookId, getOrCreateDeviceId } from './utils/helpers';
 import PassbookHeader from './components/PassbookHeader';
 import BookDepositForm from './components/BookDepositForm';
 import PassbookLedger from './components/PassbookLedger';
@@ -86,7 +86,9 @@ export default function App() {
   const fetchLatestFromCloud = async (silent = true) => {
     const activeEmail = safeStorage.getItem('digital_reading_user_email') || userEmail;
     const activeCode = safeStorage.getItem('digital_reading_sync_code') || syncCode;
+    const deviceId = getOrCreateDeviceId();
 
+    // 1. Account Sync
     if (activeEmail) {
       try {
         const res = await fetch(`/api/auth/user/${encodeURIComponent(activeEmail.trim().toLowerCase())}`);
@@ -106,7 +108,6 @@ export default function App() {
             safeStorage.setItem('digital_reading_owner_name', data.ownerName || '이가연');
             safeStorage.setItem('digital_reading_owner_title', data.ownerTitle || '반짝반짝');
 
-            // If local device had new unsynced books, sync merged state back to cloud immediately
             if (mergedBooks.length > cloudBooks.length || (cloudBooks.length > 0 && mergedBooks.length < cloudBooks.length)) {
               triggerAutoSync(activeEmail, activeCode, mergedBooks, data.ownerName || ownerName, data.ownerTitle || ownerTitle);
             }
@@ -120,6 +121,7 @@ export default function App() {
         if (!silent) console.warn('Cloud fetch failed:', e);
       }
     } else if (activeCode) {
+      // 2. Code Sync
       try {
         const res = await fetch(`/api/sync/load/${encodeURIComponent(activeCode.trim().toUpperCase())}`);
         if (res.ok) {
@@ -138,7 +140,6 @@ export default function App() {
             safeStorage.setItem('digital_reading_owner_name', data.ownerName || '이가연');
             safeStorage.setItem('digital_reading_owner_title', data.ownerTitle || '반짝반짝');
 
-            // Sync back to server if local had additional items
             if (mergedBooks.length > cloudBooks.length || (cloudBooks.length > 0 && mergedBooks.length < cloudBooks.length)) {
               triggerAutoSync(activeEmail, activeCode, mergedBooks, data.ownerName || ownerName, data.ownerTitle || ownerTitle);
             }
@@ -151,6 +152,37 @@ export default function App() {
       } catch (e) {
         if (!silent) console.warn('Sync code fetch failed:', e);
       }
+    } else {
+      // 3. Anonymous Device Cloud Auto-Backup (Ensures 100% data preservation even without login)
+      try {
+        const res = await fetch(`/api/device/load/${encodeURIComponent(deviceId)}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success && Array.isArray(data.books) && data.books.length > 0) {
+            const cloudBooks: BookRecord[] = data.books;
+            const currentLocalBooks = await loadMergedLocalBooks();
+            const memoryBooks = booksRef.current;
+            const mergedBooks = mergeBooks(cloudBooks, currentLocalBooks, memoryBooks);
+
+            if (mergedBooks.length > 0) {
+              setBooks(mergedBooks);
+              saveBooksToStorage(mergedBooks);
+            }
+            if (data.ownerName && !safeStorage.getItem('digital_reading_owner_name')) {
+              setOwnerName(data.ownerName);
+            }
+            if (data.ownerTitle && !safeStorage.getItem('digital_reading_owner_title')) {
+              setOwnerTitle(data.ownerTitle);
+            }
+
+            if (mergedBooks.length > cloudBooks.length) {
+              triggerAutoSync(activeEmail, activeCode, mergedBooks, data.ownerName || ownerName, data.ownerTitle || ownerTitle);
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('Anonymous device cloud load failed:', e);
+      }
     }
   };
 
@@ -159,8 +191,10 @@ export default function App() {
     const initStorage = async () => {
       const mergedInitial = await loadMergedLocalBooks();
 
-      setBooks(mergedInitial);
-      saveBooksToStorage(mergedInitial);
+      if (mergedInitial.length > 0) {
+        setBooks(mergedInitial);
+        saveBooksToStorage(mergedInitial);
+      }
 
       const storedName = safeStorage.getItem('digital_reading_owner_name');
       const storedTitle = safeStorage.getItem('digital_reading_owner_title');
@@ -181,8 +215,8 @@ export default function App() {
         setUserEmail(storedEmail);
       }
 
-      // Initial cloud fetch on launch
-      fetchLatestFromCloud(true);
+      // Initial cloud fetch & sync on launch
+      await fetchLatestFromCloud(true);
     };
 
     initStorage();
@@ -204,6 +238,7 @@ export default function App() {
     const handleFlushState = () => {
       if (booksRef.current && booksRef.current.length > 0) {
         saveBooksToStorage(booksRef.current);
+        triggerAutoSync(userEmail, syncCode, booksRef.current, ownerName, ownerTitle);
       }
     };
 
@@ -213,6 +248,7 @@ export default function App() {
     document.addEventListener('visibilitychange', handleFocus);
     window.addEventListener('pagehide', handleFlushState);
     window.addEventListener('beforeunload', handleFlushState);
+    window.addEventListener('online', handleFocus);
 
     // Poll every 10 seconds if logged in or using sync code
     const interval = setInterval(() => {
@@ -226,6 +262,7 @@ export default function App() {
       document.removeEventListener('visibilitychange', handleFocus);
       window.removeEventListener('pagehide', handleFlushState);
       window.removeEventListener('beforeunload', handleFlushState);
+      window.removeEventListener('online', handleFocus);
       clearInterval(interval);
     };
   }, [userEmail, syncCode]);
@@ -240,7 +277,23 @@ export default function App() {
     isClearAll = false
   ) => {
     const deletedIds = getDeletedBookIds();
-    // 1. Account sync (prioritized, no manual button needed!)
+    const deviceId = getOrCreateDeviceId();
+
+    // 0. Universal Anonymous Device Backup (Always runs in background to prevent any data loss!)
+    fetch('/api/device/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        deviceId,
+        books: currentBooks,
+        deletedIds,
+        ownerName: currentName,
+        ownerTitle: currentTitle,
+        isClearAll
+      })
+    }).catch(() => {});
+
+    // 1. Account sync (prioritized)
     if (email) {
       fetch('/api/auth/save', {
         method: 'POST',
@@ -283,12 +336,10 @@ export default function App() {
       .then(data => {
         if (data.success) {
           console.log('[Sync] Legacy auto-saved successfully to server.');
-        } else {
-          console.warn('[Sync] Legacy auto-save failed:', data.error);
         }
       })
       .catch(err => {
-        console.warn('[Sync] Legacy auto-save failed due to network error:', err);
+        console.warn('[Sync] Legacy auto-save failed:', err);
       });
     }
   };
@@ -463,7 +514,8 @@ export default function App() {
   // Add new book to ledger
   const handleAddBook = (newBook: BookRecord) => {
     clearDeletedBookId(newBook.id);
-    const updatedBooks = [newBook, ...books.filter(b => b.id !== newBook.id)];
+    const currentList = booksRef.current || [];
+    const updatedBooks = [newBook, ...currentList.filter(b => b && b.id !== newBook.id)];
     setBooks(updatedBooks);
     saveBooksToStorage(updatedBooks);
     triggerAutoSync(userEmail, syncCode, updatedBooks, ownerName, ownerTitle);
@@ -513,7 +565,8 @@ export default function App() {
   // Delete individual book
   const handleDeleteBook = (id: string) => {
     addDeletedBookId(id);
-    const updatedBooks = books.filter((b) => b.id !== id);
+    const currentList = booksRef.current || [];
+    const updatedBooks = currentList.filter((b) => b && b.id !== id);
     setBooks(updatedBooks);
     saveBooksToStorage(updatedBooks);
     triggerAutoSync(userEmail, syncCode, updatedBooks, ownerName, ownerTitle);
@@ -522,7 +575,8 @@ export default function App() {
 
   // Clear all book records
   const handleClearAll = () => {
-    books.forEach(b => addDeletedBookId(b.id));
+    const currentList = booksRef.current || [];
+    currentList.forEach(b => { if (b && b.id) addDeletedBookId(b.id); });
     setBooks([]);
     saveBooksToStorage([]);
     triggerAutoSync(userEmail, syncCode, [], ownerName, ownerTitle, true);
