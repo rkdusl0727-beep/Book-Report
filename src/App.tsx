@@ -1,13 +1,30 @@
 import { useState, useEffect, useRef } from 'react';
-import { BookRecord, ActiveTab } from './types';
-import { loadBooksFromStorage, saveBooksToStorage, safeStorage, loadBooksFromIDB, loadMergedLocalBooks, getDeletedBookIds, addDeletedBookId, clearDeletedBookId, getOrCreateDeviceId } from './utils/helpers';
+import { BookRecord, ActiveTab, PassbookVolume } from './types';
+import {
+  loadBooksFromStorage,
+  saveBooksToStorage,
+  safeStorage,
+  loadBooksFromIDB,
+  loadMergedLocalBooks,
+  getDeletedBookIds,
+  addDeletedBookId,
+  clearDeletedBookId,
+  getOrCreateDeviceId,
+  loadMergedLocalVolumes,
+  saveVolumesToStorage,
+  archiveCurrentPassbook,
+  getCurrentVolumeNumber,
+  setCurrentVolumeNumber,
+  exportPassbookBackupJSON
+} from './utils/helpers';
 import PassbookHeader from './components/PassbookHeader';
 import BookDepositForm from './components/BookDepositForm';
 import PassbookLedger from './components/PassbookLedger';
 import CelebrationModal from './components/CelebrationModal';
 import CuteModal from './components/CuteModal';
 import SyncModal from './components/SyncModal';
-import { Sparkles, Star, Heart } from 'lucide-react';
+import ArchivedVolumesModal from './components/ArchivedVolumesModal';
+import { Sparkles, Star, Heart, Trophy } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
 export default function App() {
@@ -20,13 +37,29 @@ export default function App() {
     booksRef.current = books;
   }, [books]);
 
+  // Volume / Multi-passbook archival states
+  const [volumes, setVolumes] = useState<PassbookVolume[]>([]);
+  const volumesRef = useRef<PassbookVolume[]>([]);
+  const [currentVolume, setCurrentVolume] = useState<number>(1);
+  const currentVolumeRef = useRef<number>(1);
+
+  useEffect(() => {
+    volumesRef.current = volumes;
+  }, [volumes]);
+
+  useEffect(() => {
+    currentVolumeRef.current = currentVolume;
+  }, [currentVolume]);
+
   const [ownerName, setOwnerName] = useState<string>('이가연');
   const [ownerTitle, setOwnerTitle] = useState<string>('반짝반짝');
   const [activeTab, setActiveTab] = useState<ActiveTab>('deposit');
 
-  // Milestone Celebration States
+  // Modal states
   const [showCelebration, setShowCelebration] = useState(false);
   const [celebrationBookCount, setCelebrationBookCount] = useState(0);
+  const [isArchivedModalOpen, setIsArchivedModalOpen] = useState(false);
+  const [showResetVolumeModal, setShowResetVolumeModal] = useState(false);
 
   // Sync states
   const [syncCode, setSyncCode] = useState<string | null>(null);
@@ -57,6 +90,7 @@ export default function App() {
       coverImage: b.coverImage || a.coverImage || null,
       feeling: b.feeling || a.feeling || '',
       rating: b.rating || a.rating || 5,
+      volumeNumber: b.volumeNumber || a.volumeNumber || currentVolumeRef.current || 1,
     };
   };
 
@@ -82,6 +116,31 @@ export default function App() {
     return Array.from(map.values());
   };
 
+  // Helper to merge volumes safely across cloud, local, and in-memory stores
+  const mergeVolumes = (cloudVolumes: PassbookVolume[], localVolumes: PassbookVolume[], memoryVolumes: PassbookVolume[] = []): PassbookVolume[] => {
+    const map = new Map<string, PassbookVolume>();
+
+    const processVol = (v: PassbookVolume) => {
+      if (!v || !v.id) return;
+      if (map.has(v.id)) {
+        const existing = map.get(v.id)!;
+        map.set(v.id, {
+          ...existing,
+          ...v,
+          books: (v.books && v.books.length >= (existing.books?.length || 0)) ? v.books : existing.books
+        });
+      } else {
+        map.set(v.id, v);
+      }
+    };
+
+    (cloudVolumes || []).forEach(processVol);
+    (localVolumes || []).forEach(processVol);
+    (memoryVolumes || []).forEach(processVol);
+
+    return Array.from(map.values()).sort((a, b) => (a.volumeNumber || 1) - (b.volumeNumber || 1));
+  };
+
   // Helper to fetch latest data from cloud with lossless merging
   const fetchLatestFromCloud = async (silent = true) => {
     const activeEmail = safeStorage.getItem('digital_reading_user_email') || userEmail;
@@ -96,20 +155,30 @@ export default function App() {
           const data = await res.json();
           if (data.success) {
             const cloudBooks: BookRecord[] = data.books || [];
+            const cloudVolumes: PassbookVolume[] = data.volumes || [];
             const currentLocalBooks = await loadMergedLocalBooks();
+            const currentLocalVolumes = await loadMergedLocalVolumes();
             const memoryBooks = booksRef.current;
+            const memoryVolumes = volumesRef.current;
+
             const mergedBooks = mergeBooks(cloudBooks, currentLocalBooks, memoryBooks);
+            const mergedVolumes = mergeVolumes(cloudVolumes, currentLocalVolumes, memoryVolumes);
+            const nextVol = Math.max(data.currentVolume || 1, currentVolumeRef.current, getCurrentVolumeNumber());
 
             setBooks(mergedBooks);
+            setVolumes(mergedVolumes);
+            setCurrentVolume(nextVol);
             setOwnerName(data.ownerName || '이가연');
             setOwnerTitle(data.ownerTitle || '반짝반짝');
 
             saveBooksToStorage(mergedBooks);
+            saveVolumesToStorage(mergedVolumes);
+            setCurrentVolumeNumber(nextVol);
             safeStorage.setItem('digital_reading_owner_name', data.ownerName || '이가연');
             safeStorage.setItem('digital_reading_owner_title', data.ownerTitle || '반짝반짝');
 
-            if (mergedBooks.length > cloudBooks.length || (cloudBooks.length > 0 && mergedBooks.length < cloudBooks.length)) {
-              triggerAutoSync(activeEmail, activeCode, mergedBooks, data.ownerName || ownerName, data.ownerTitle || ownerTitle);
+            if (mergedBooks.length > cloudBooks.length || mergedVolumes.length > cloudVolumes.length) {
+              triggerAutoSync(activeEmail, activeCode, mergedBooks, data.ownerName || ownerName, data.ownerTitle || ownerTitle, false, mergedVolumes, nextVol);
             }
 
             if (!silent) {
@@ -128,20 +197,30 @@ export default function App() {
           const data = await res.json();
           if (data.success) {
             const cloudBooks: BookRecord[] = data.books || [];
+            const cloudVolumes: PassbookVolume[] = data.volumes || [];
             const currentLocalBooks = await loadMergedLocalBooks();
+            const currentLocalVolumes = await loadMergedLocalVolumes();
             const memoryBooks = booksRef.current;
+            const memoryVolumes = volumesRef.current;
+
             const mergedBooks = mergeBooks(cloudBooks, currentLocalBooks, memoryBooks);
+            const mergedVolumes = mergeVolumes(cloudVolumes, currentLocalVolumes, memoryVolumes);
+            const nextVol = Math.max(data.currentVolume || 1, currentVolumeRef.current, getCurrentVolumeNumber());
 
             setBooks(mergedBooks);
+            setVolumes(mergedVolumes);
+            setCurrentVolume(nextVol);
             setOwnerName(data.ownerName || '이가연');
             setOwnerTitle(data.ownerTitle || '반짝반짝');
 
             saveBooksToStorage(mergedBooks);
+            saveVolumesToStorage(mergedVolumes);
+            setCurrentVolumeNumber(nextVol);
             safeStorage.setItem('digital_reading_owner_name', data.ownerName || '이가연');
             safeStorage.setItem('digital_reading_owner_title', data.ownerTitle || '반짝반짝');
 
-            if (mergedBooks.length > cloudBooks.length || (cloudBooks.length > 0 && mergedBooks.length < cloudBooks.length)) {
-              triggerAutoSync(activeEmail, activeCode, mergedBooks, data.ownerName || ownerName, data.ownerTitle || ownerTitle);
+            if (mergedBooks.length > cloudBooks.length || mergedVolumes.length > cloudVolumes.length) {
+              triggerAutoSync(activeEmail, activeCode, mergedBooks, data.ownerName || ownerName, data.ownerTitle || ownerTitle, false, mergedVolumes, nextVol);
             }
 
             if (!silent) {
@@ -158,16 +237,29 @@ export default function App() {
         const res = await fetch(`/api/device/load/${encodeURIComponent(deviceId)}`);
         if (res.ok) {
           const data = await res.json();
-          if (data.success && Array.isArray(data.books) && data.books.length > 0) {
-            const cloudBooks: BookRecord[] = data.books;
+          if (data.success) {
+            const cloudBooks: BookRecord[] = data.books || [];
+            const cloudVolumes: PassbookVolume[] = data.volumes || [];
             const currentLocalBooks = await loadMergedLocalBooks();
+            const currentLocalVolumes = await loadMergedLocalVolumes();
             const memoryBooks = booksRef.current;
+            const memoryVolumes = volumesRef.current;
+
             const mergedBooks = mergeBooks(cloudBooks, currentLocalBooks, memoryBooks);
+            const mergedVolumes = mergeVolumes(cloudVolumes, currentLocalVolumes, memoryVolumes);
+            const nextVol = Math.max(data.currentVolume || 1, currentVolumeRef.current, getCurrentVolumeNumber());
 
             if (mergedBooks.length > 0) {
               setBooks(mergedBooks);
               saveBooksToStorage(mergedBooks);
             }
+            if (mergedVolumes.length > 0) {
+              setVolumes(mergedVolumes);
+              saveVolumesToStorage(mergedVolumes);
+            }
+            setCurrentVolume(nextVol);
+            setCurrentVolumeNumber(nextVol);
+
             if (data.ownerName && !safeStorage.getItem('digital_reading_owner_name')) {
               setOwnerName(data.ownerName);
             }
@@ -175,8 +267,8 @@ export default function App() {
               setOwnerTitle(data.ownerTitle);
             }
 
-            if (mergedBooks.length > cloudBooks.length) {
-              triggerAutoSync(activeEmail, activeCode, mergedBooks, data.ownerName || ownerName, data.ownerTitle || ownerTitle);
+            if (mergedBooks.length > cloudBooks.length || mergedVolumes.length > cloudVolumes.length) {
+              triggerAutoSync(activeEmail, activeCode, mergedBooks, data.ownerName || ownerName, data.ownerTitle || ownerTitle, false, mergedVolumes, nextVol);
             }
           }
         }
@@ -186,15 +278,24 @@ export default function App() {
     }
   };
 
-  // Load books, owner name & sync code from storage on mount + Cloud fetch
+  // Load books, volumes, owner name & sync code from storage on mount + Cloud fetch
   useEffect(() => {
     const initStorage = async () => {
-      const mergedInitial = await loadMergedLocalBooks();
+      const mergedInitialBooks = await loadMergedLocalBooks();
+      const mergedInitialVolumes = await loadMergedLocalVolumes();
+      const currentVolNum = getCurrentVolumeNumber();
 
-      if (mergedInitial.length > 0) {
-        setBooks(mergedInitial);
-        saveBooksToStorage(mergedInitial);
+      if (mergedInitialBooks.length > 0) {
+        setBooks(mergedInitialBooks);
+        saveBooksToStorage(mergedInitialBooks);
       }
+
+      if (mergedInitialVolumes.length > 0) {
+        setVolumes(mergedInitialVolumes);
+        saveVolumesToStorage(mergedInitialVolumes);
+      }
+
+      setCurrentVolume(currentVolNum);
 
       const storedName = safeStorage.getItem('digital_reading_owner_name');
       const storedTitle = safeStorage.getItem('digital_reading_owner_title');
@@ -226,10 +327,15 @@ export default function App() {
   useEffect(() => {
     const handleFocus = async () => {
       // 1. Instantly merge disk, IndexedDB & in-memory state on navigation/focus to prevent UI drops
-      const currentLocal = await loadMergedLocalBooks();
-      const currentMemory = booksRef.current;
-      const merged = mergeBooks([], currentLocal, currentMemory);
-      setBooks(merged);
+      const currentLocalBooks = await loadMergedLocalBooks();
+      const currentMemoryBooks = booksRef.current;
+      const mergedBooks = mergeBooks([], currentLocalBooks, currentMemoryBooks);
+      setBooks(mergedBooks);
+
+      const currentLocalVolumes = await loadMergedLocalVolumes();
+      const currentMemoryVolumes = volumesRef.current;
+      const mergedVols = mergeVolumes([], currentLocalVolumes, currentMemoryVolumes);
+      setVolumes(mergedVols);
 
       // 2. Fetch latest from cloud with lossless 3-way merging
       fetchLatestFromCloud(true);
@@ -238,8 +344,11 @@ export default function App() {
     const handleFlushState = () => {
       if (booksRef.current && booksRef.current.length > 0) {
         saveBooksToStorage(booksRef.current);
-        triggerAutoSync(userEmail, syncCode, booksRef.current, ownerName, ownerTitle);
       }
+      if (volumesRef.current && volumesRef.current.length > 0) {
+        saveVolumesToStorage(volumesRef.current);
+      }
+      triggerAutoSync(userEmail, syncCode, booksRef.current, ownerName, ownerTitle, false, volumesRef.current, currentVolumeRef.current);
     };
 
     window.addEventListener('focus', handleFocus);
@@ -274,10 +383,14 @@ export default function App() {
     currentBooks: BookRecord[],
     currentName: string,
     currentTitle: string,
-    isClearAll = false
+    isClearAll = false,
+    currentVolumes?: PassbookVolume[],
+    volNumber?: number
   ) => {
     const deletedIds = getDeletedBookIds();
     const deviceId = getOrCreateDeviceId();
+    const volsToSync = currentVolumes !== undefined ? currentVolumes : volumesRef.current;
+    const volNumToSync = volNumber !== undefined ? volNumber : currentVolumeRef.current;
 
     // 0. Universal Anonymous Device Backup (Always runs in background to prevent any data loss!)
     fetch('/api/device/save', {
@@ -286,6 +399,8 @@ export default function App() {
       body: JSON.stringify({
         deviceId,
         books: currentBooks,
+        volumes: volsToSync,
+        currentVolume: volNumToSync,
         deletedIds,
         ownerName: currentName,
         ownerTitle: currentTitle,
@@ -301,6 +416,8 @@ export default function App() {
         body: JSON.stringify({
           email: email.trim().toLowerCase(),
           books: currentBooks,
+          volumes: volsToSync,
+          currentVolume: volNumToSync,
           deletedIds,
           ownerName: currentName,
           ownerTitle: currentTitle,
@@ -308,11 +425,6 @@ export default function App() {
         })
       })
       .then(res => res.json())
-      .then(data => {
-        if (data.success) {
-          console.log('[Sync] Cloud auto-saved successfully.');
-        }
-      })
       .catch(err => {
         console.warn('[Sync] Cloud auto-save failed:', err);
       });
@@ -326,6 +438,8 @@ export default function App() {
         body: JSON.stringify({
           syncCode: code.trim().toUpperCase(),
           books: currentBooks,
+          volumes: volsToSync,
+          currentVolume: volNumToSync,
           deletedIds,
           ownerName: currentName,
           ownerTitle: currentTitle,
@@ -333,15 +447,48 @@ export default function App() {
         })
       })
       .then(res => res.json())
-      .then(data => {
-        if (data.success) {
-          console.log('[Sync] Legacy auto-saved successfully to server.');
-        }
-      })
       .catch(err => {
         console.warn('[Sync] Legacy auto-save failed:', err);
       });
     }
+  };
+
+  // Archival and Reset Milestone Action
+  const handleArchiveAndStartNextVolume = () => {
+    const currentBooks = booksRef.current || [];
+    const currentVol = currentVolumeRef.current || 1;
+    const existingVols = volumesRef.current || [];
+
+    const { updatedVolumes, nextVolume } = archiveCurrentPassbook(
+      currentBooks,
+      currentVol,
+      ownerName,
+      ownerTitle,
+      existingVols
+    );
+
+    setVolumes(updatedVolumes);
+    volumesRef.current = updatedVolumes;
+    setCurrentVolume(nextVolume);
+    currentVolumeRef.current = nextVolume;
+    setBooks([]);
+    booksRef.current = [];
+
+    // Trigger auto-sync to backend immediately
+    triggerAutoSync(userEmail, syncCode, [], ownerName, ownerTitle, false, updatedVolumes, nextVolume);
+
+    setShowResetVolumeModal(false);
+    setShowCelebration(false);
+    setActiveTab('deposit');
+
+    // Confetti celebration!
+    confetti({ particleCount: 160, spread: 100, origin: { y: 0.6 } });
+
+    showCustomAlert(
+      '🎉 완독 통장 보관 및 새 통장 시작!',
+      `축하합니다! 제 ${currentVol}호 통장(${currentBooks.length}권)이 [완독 보관함]에 안전하게 영구 저장되었습니다.\n이제 제 ${nextVolume}호 새 통장이 1권부터 신나게 시작됩니다! ✨`,
+      'success'
+    );
   };
 
   // Sync action handlers
@@ -351,7 +498,13 @@ export default function App() {
       const res = await fetch('/api/sync/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ books, ownerName, ownerTitle })
+        body: JSON.stringify({
+          books,
+          volumes,
+          currentVolume,
+          ownerName,
+          ownerTitle
+        })
       });
       const data = await res.json();
       if (data.success && data.syncCode) {
@@ -385,23 +538,30 @@ export default function App() {
       const data = await res.json();
       if (data.success) {
         const currentLocalBooks = await loadMergedLocalBooks();
+        const currentLocalVolumes = await loadMergedLocalVolumes();
         const mergedBooks = mergeBooks(data.books || [], currentLocalBooks);
+        const mergedVolumes = mergeVolumes(data.volumes || [], currentLocalVolumes);
+        const nextVol = Math.max(data.currentVolume || 1, currentVolumeRef.current, getCurrentVolumeNumber());
 
         setBooks(mergedBooks);
+        setVolumes(mergedVolumes);
+        setCurrentVolume(nextVol);
         setOwnerName(data.ownerName || ownerName);
         setOwnerTitle(data.ownerTitle || ownerTitle);
         setSyncCode(upperInput);
 
         saveBooksToStorage(mergedBooks);
+        saveVolumesToStorage(mergedVolumes);
+        setCurrentVolumeNumber(nextVol);
         safeStorage.setItem('digital_reading_owner_name', data.ownerName || ownerName);
         safeStorage.setItem('digital_reading_owner_title', data.ownerTitle || ownerTitle);
         safeStorage.setItem('digital_reading_sync_code', upperInput);
 
         // Sync back merged state
-        triggerAutoSync(userEmail, upperInput, mergedBooks, data.ownerName || ownerName, data.ownerTitle || ownerTitle);
+        triggerAutoSync(userEmail, upperInput, mergedBooks, data.ownerName || ownerName, data.ownerTitle || ownerTitle, false, mergedVolumes, nextVol);
 
         setIsSyncModalOpen(false);
-        showCustomAlert('연동 성공! 🎉', `[${data.ownerName}] 책통장의 기록을 성공적으로 가져와 연동했어요!`, 'success');
+        showCustomAlert('연동 성공! 🎉', `[${data.ownerName}] 책통장의 모든 기록과 완독 보관함을 성공적으로 가져와 연동했어요!`, 'success');
       }
     } catch (e) {
       showCustomAlert('오류', '네트워크 연결을 확인해 주세요.', 'warning');
@@ -424,7 +584,15 @@ export default function App() {
       const res = await fetch('/api/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: normalizedEmail, password: pass.trim(), ownerName, ownerTitle, books })
+        body: JSON.stringify({
+          email: normalizedEmail,
+          password: pass.trim(),
+          ownerName,
+          ownerTitle,
+          books,
+          volumes,
+          currentVolume
+        })
       });
       const data = await res.json();
       if (res.ok && data.success) {
@@ -455,27 +623,34 @@ export default function App() {
       if (res.ok && data.success) {
         setUserEmail(data.email);
 
-        // Merge any local offline books on this device with cloud books
+        // Merge any local offline books & volumes on this device with cloud data
         const currentLocalBooks = await loadMergedLocalBooks();
+        const currentLocalVolumes = await loadMergedLocalVolumes();
         const mergedBooks = mergeBooks(data.books || [], currentLocalBooks);
+        const mergedVolumes = mergeVolumes(data.volumes || [], currentLocalVolumes);
+        const nextVol = Math.max(data.currentVolume || 1, currentVolumeRef.current, getCurrentVolumeNumber());
 
         const finalName = data.ownerName || ownerName;
         const finalTitle = data.ownerTitle || ownerTitle;
 
         setBooks(mergedBooks);
+        setVolumes(mergedVolumes);
+        setCurrentVolume(nextVol);
         setOwnerName(finalName);
         setOwnerTitle(finalTitle);
 
         saveBooksToStorage(mergedBooks);
+        saveVolumesToStorage(mergedVolumes);
+        setCurrentVolumeNumber(nextVol);
         safeStorage.setItem('digital_reading_owner_name', finalName);
         safeStorage.setItem('digital_reading_owner_title', finalTitle);
         safeStorage.setItem('digital_reading_user_email', data.email);
 
-        // Immediately sync merged books back to cloud server
-        triggerAutoSync(data.email, syncCode, mergedBooks, finalName, finalTitle);
+        // Immediately sync merged state back to cloud server
+        triggerAutoSync(data.email, syncCode, mergedBooks, finalName, finalTitle, false, mergedVolumes, nextVol);
 
         setIsSyncModalOpen(false);
-        showCustomAlert('로그인 성공! 🎉', `[${finalName}] 책통장의 모든 기록을 안전하게 불러와 연동했어요!`, 'success');
+        showCustomAlert('로그인 성공! 🎉', `[${finalName}] 책통장의 모든 기록과 완독 보관함을 안전하게 불러와 연동했어요!`, 'success');
       } else {
         showCustomAlert('로그인 실패 ❌', data.error || '이메일 또는 비밀번호를 다시 확인해 주세요.', 'warning');
       }
@@ -490,6 +665,81 @@ export default function App() {
     setUserEmail(null);
     safeStorage.removeItem('digital_reading_user_email');
     showCustomAlert('로그아웃 완료', '안전하게 로그아웃 되었어요. 이 기기에서의 기록은 그대로 유지됩니다.', 'info');
+  };
+
+  // Emergency local backup and file export/import
+  const handleExportBackup = () => {
+    try {
+      const currentBooks = booksRef.current || [];
+      const currentVols = volumesRef.current || [];
+      const curVol = currentVolumeRef.current || 1;
+      const jsonStr = exportPassbookBackupJSON(currentBooks, currentVols, curVol, ownerName, ownerTitle);
+      const blob = new Blob([jsonStr], { type: 'application/json;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const today = new Date().toISOString().slice(0, 10);
+      a.href = url;
+      a.download = `독서통장_전체백업_${ownerName}_${today}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showCustomAlert('백업 다운로드 완료 💾', '내 기기에 제 1호 통장 및 모든 독서 기록 파일이 안전하게 저장되었습니다!', 'success');
+    } catch (e) {
+      showCustomAlert('백업 실패', '파일을 저장하지 못했습니다.', 'warning');
+    }
+  };
+
+  const handleImportBackup = (file: File) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      try {
+        const text = e.target?.result as string;
+        if (!text) throw new Error('Empty file');
+        const parsed = JSON.parse(text);
+
+        if (!parsed || (!Array.isArray(parsed.books) && !Array.isArray(parsed.volumes))) {
+          showCustomAlert('복원 실패', '올바른 독서통장 백업 파일(.json)이 아닙니다.', 'warning');
+          return;
+        }
+
+        const incomingBooks: BookRecord[] = parsed.books || [];
+        const incomingVolumes: PassbookVolume[] = parsed.volumes || [];
+        const currentLocalBooks = await loadMergedLocalBooks();
+        const currentLocalVolumes = await loadMergedLocalVolumes();
+
+        const mergedBooks = mergeBooks(incomingBooks, currentLocalBooks, booksRef.current);
+        const mergedVolumes = mergeVolumes(incomingVolumes, currentLocalVolumes, volumesRef.current);
+        const nextVol = Math.max(parsed.currentVolume || 1, currentVolumeRef.current, getCurrentVolumeNumber());
+
+        const finalName = parsed.ownerName || ownerName;
+        const finalTitle = parsed.ownerTitle || ownerTitle;
+
+        setBooks(mergedBooks);
+        setVolumes(mergedVolumes);
+        setCurrentVolume(nextVol);
+        setOwnerName(finalName);
+        setOwnerTitle(finalTitle);
+
+        saveBooksToStorage(mergedBooks);
+        saveVolumesToStorage(mergedVolumes);
+        setCurrentVolumeNumber(nextVol);
+        safeStorage.setItem('digital_reading_owner_name', finalName);
+        safeStorage.setItem('digital_reading_owner_title', finalTitle);
+
+        triggerAutoSync(userEmail, syncCode, mergedBooks, finalName, finalTitle, false, mergedVolumes, nextVol);
+
+        showCustomAlert(
+          '복원 완료! 🎉',
+          `백업 파일로부터 제 1호 통장 및 총 ${mergedBooks.length}권의 독서 기록과 ${mergedVolumes.length}개의 완독 보관함을 안전하게 복원했어요!`,
+          'success'
+        );
+      } catch (err) {
+        showCustomAlert('복원 오류', '백업 파일을 읽는 중 문제가 발생했습니다.', 'warning');
+      }
+    };
+    reader.readAsText(file);
   };
 
   // Sync owner info to storage
@@ -514,8 +764,12 @@ export default function App() {
   // Add new book to ledger
   const handleAddBook = (newBook: BookRecord) => {
     clearDeletedBookId(newBook.id);
+    const stampedBook: BookRecord = {
+      ...newBook,
+      volumeNumber: currentVolumeRef.current || 1
+    };
     const currentList = booksRef.current || [];
-    const updatedBooks = [newBook, ...currentList.filter(b => b && b.id !== newBook.id)];
+    const updatedBooks = [stampedBook, ...currentList.filter(b => b && b.id !== stampedBook.id)];
     setBooks(updatedBooks);
     saveBooksToStorage(updatedBooks);
     triggerAutoSync(userEmail, syncCode, updatedBooks, ownerName, ownerTitle);
@@ -524,7 +778,7 @@ export default function App() {
     setActiveTab('ledger');
 
     // Trigger Success alert
-    showCustomAlert('참 잘했어요!', `와아! [${newBook.title}] 책 저축에 성공했어요!`, 'success');
+    showCustomAlert('참 잘했어요!', `와아! [${stampedBook.title}] 책 저축에 성공했어요!`, 'success');
 
     // Mega Confetti & Certificate Milestone logic
     const targetCount = updatedBooks.length;
@@ -551,7 +805,6 @@ export default function App() {
           }
 
           const particleCount = 50 * (timeLeft / duration);
-          // since particles fall down, animate them slightly higher than random
           confetti({ ...defaults, particleCount, origin: { x: randomInRange(0.1, 0.3), y: Math.random() - 0.2 } });
           confetti({ ...defaults, particleCount, origin: { x: randomInRange(0.7, 0.9), y: Math.random() - 0.2 } });
         }, 250);
@@ -597,6 +850,10 @@ export default function App() {
           syncCode={syncCode}
           onOpenSync={() => setIsSyncModalOpen(true)}
           userEmail={userEmail}
+          currentVolume={currentVolume}
+          volumesCount={volumes.length}
+          onOpenVolumes={() => setIsArchivedModalOpen(true)}
+          onOpenResetModal={() => setShowResetVolumeModal(true)}
         />
 
         {/* Tab Content with animations */}
@@ -608,11 +865,15 @@ export default function App() {
               books={books}
               onDeleteBook={handleDeleteBook}
               onClearAll={handleClearAll}
+              onOpenResetModal={() => setShowResetVolumeModal(true)}
+              onOpenVolumes={() => setIsArchivedModalOpen(true)}
+              volumesCount={volumes.length}
+              currentVolume={currentVolume}
             />
           )}
         </main>
 
-        {/* Cute footer design constraint mapping */}
+        {/* Cute footer */}
         <footer className="text-center font-gaegu text-[#A19582] py-6 border-t border-dashed border-[#E6D5B8] flex flex-col items-center gap-1.5">
           <div className="flex flex-col sm:flex-row items-center justify-center gap-1.5 sm:gap-2 font-bold text-base min-[360px]:text-lg sm:text-xl md:text-2xl">
             <div className="flex items-center justify-center gap-1.5 whitespace-nowrap">
@@ -627,13 +888,64 @@ export default function App() {
         </footer>
       </div>
 
-      {/* 10-Book Milestone Certificate celebration Modal */}
+      {/* 10/20/30-Book Milestone Certificate celebration Modal */}
       <CelebrationModal
         isOpen={showCelebration}
         onClose={() => setShowCelebration(false)}
         ownerName={`${ownerName} (${ownerTitle})`}
         bookCount={celebrationBookCount}
+        onStartNextVolume={() => {
+          setShowCelebration(false);
+          setShowResetVolumeModal(true);
+        }}
       />
+
+      {/* Archived Volumes Modal */}
+      <ArchivedVolumesModal
+        isOpen={isArchivedModalOpen}
+        onClose={() => setIsArchivedModalOpen(false)}
+        volumes={volumes}
+        currentVolume={currentVolume}
+      />
+
+      {/* 30-Book Archival & Reset Confirmation Cute Modal */}
+      <CuteModal
+        isOpen={showResetVolumeModal}
+        onClose={() => setShowResetVolumeModal(false)}
+        title="🎉 30권 완독 통장 보관 & 새 통장 시작"
+        type="success"
+      >
+        <div className="flex flex-col items-center gap-4 text-center">
+          <div className="w-16 h-16 rounded-full bg-[#FFF3E0] text-[#FF8B3D] flex items-center justify-center">
+            <Trophy size={36} />
+          </div>
+          <div className="space-y-2">
+            <p className="font-gaegu text-2xl font-bold text-[#5D5443]">
+              현재 <span className="text-[#4E9F57]">제 {currentVolume}호 독서통장 ({books.length}권)</span>을<br />
+              <span className="text-[#FF8B3D] underline decoration-wavy">[완독 보관함]</span>에 안전하게 보관할까요?
+            </p>
+            <p className="font-sans text-xs sm:text-sm text-[#8C7E6A] bg-[#FDFCF0] p-3 rounded-xl border border-[#E6D5B8]">
+              💡 <strong>안내:</strong> 지금까지 읽은 30권의 책, 그림, 음성 녹음은 <strong>절대 지워지지 않고 [완독 보관함]에 영구 보존</strong>되며, 현재 통장은 <strong>제 {currentVolume + 1}호 새 통장(1권부터)</strong>으로 기분 좋게 시작됩니다!
+            </p>
+          </div>
+          <div className="flex gap-3 w-full mt-2">
+            <button
+              onClick={() => setShowResetVolumeModal(false)}
+              className="flex-1 py-3 bg-stone-100 hover:bg-stone-200 text-[#8C7E6A] font-gaegu text-xl font-bold rounded-2xl transition-colors cursor-pointer"
+            >
+              다음에 할래요
+            </button>
+            <button
+              onClick={handleArchiveAndStartNextVolume}
+              id="confirm-archive-next-volume-btn"
+              className="flex-1 py-3 bg-gradient-to-r from-[#4E9F57] to-[#6BCB77] hover:from-[#3D8B46] hover:to-[#5BA867] text-white font-gaegu text-xl font-bold rounded-2xl shadow-md transition-all cursor-pointer flex items-center justify-center gap-1.5"
+            >
+              <Sparkles size={18} />
+              <span>네, 새 통장 시작해요!</span>
+            </button>
+          </div>
+        </div>
+      </CuteModal>
 
       {/* Reusable Cute Custom Modal for General Alert/Message */}
       <CuteModal
@@ -659,6 +971,8 @@ export default function App() {
         onLogin={handleLoginAccount}
         onLogout={handleLogoutAccount}
         onManualSync={() => fetchLatestFromCloud(false)}
+        onExportBackup={handleExportBackup}
+        onImportBackup={handleImportBackup}
       />
     </div>
   );

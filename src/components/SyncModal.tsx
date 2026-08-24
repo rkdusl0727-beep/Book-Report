@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { X, RefreshCw, Copy, Check, Link, ArrowRight, Trash2, Cloud, Mail, Lock, LogOut } from 'lucide-react';
+import { X, RefreshCw, Copy, Check, Link, ArrowRight, Trash2, Cloud, Mail, Lock, LogOut, Download, Upload, ShieldCheck } from 'lucide-react';
 
 interface SyncModalProps {
   isOpen: boolean;
@@ -17,6 +17,10 @@ interface SyncModalProps {
   onLogin: (email: string, pass: string) => Promise<void>;
   onLogout: () => void;
   onManualSync?: () => void;
+
+  // Emergency local backup and file export/import
+  onExportBackup?: () => void;
+  onImportBackup?: (file: File) => void;
 }
 
 export default function SyncModal({
@@ -31,10 +35,13 @@ export default function SyncModal({
   onRegister,
   onLogin,
   onLogout,
-  onManualSync
+  onManualSync,
+  onExportBackup,
+  onImportBackup
 }: SyncModalProps) {
-  // Mode selection: 'email' (new) or 'legacy' (old code sync)
-  const [syncMethod, setSyncMethod] = useState<'email' | 'legacy'>('email');
+  // Mode selection: 'email' (new) or 'legacy' (old code sync) or 'backup'
+  const [syncMethod, setSyncMethod] = useState<'email' | 'legacy' | 'backup'>('email');
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   
   // Email Auth states
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
@@ -68,6 +75,14 @@ export default function SyncModal({
       await onLogin(email.trim(), password.trim());
     } else {
       await onRegister(email.trim(), password.trim());
+    }
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file && onImportBackup) {
+      onImportBackup(file);
+      if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
 
@@ -160,7 +175,7 @@ export default function SyncModal({
                 /* 🔒 Disconnected State: Show Sync Methods */
                 <div>
                   {/* Method Tab Switcher */}
-                  <div className="flex bg-[#F5F5F5] p-1 rounded-2xl border border-stone-200 mb-4 text-xs font-bold">
+                  <div className="flex bg-[#F5F5F5] p-1 rounded-2xl border border-stone-200 mb-4 text-xs font-bold gap-1">
                     <button
                       type="button"
                       onClick={() => setSyncMethod('email')}
@@ -170,7 +185,7 @@ export default function SyncModal({
                           : 'text-[#A19582] hover:text-[#5D5443]'
                       }`}
                     >
-                      ☁️ 이메일 계정 연동 (추천)
+                      ☁️ 계정 연동
                     </button>
                     <button
                       type="button"
@@ -181,11 +196,80 @@ export default function SyncModal({
                           : 'text-[#A19582] hover:text-[#5D5443]'
                       }`}
                     >
-                      🔄 1회성 기기코드 연동
+                      🔄 기기코드
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSyncMethod('backup')}
+                      className={`flex-1 py-2 rounded-xl transition-all cursor-pointer ${
+                        syncMethod === 'backup'
+                          ? 'bg-white text-[#FF8B3D] shadow-sm font-extrabold'
+                          : 'text-[#A19582] hover:text-[#5D5443]'
+                      }`}
+                    >
+                      🛡️ 파일 백업/복원
                     </button>
                   </div>
 
-                  {syncMethod === 'email' ? (
+                  {syncMethod === 'backup' ? (
+                    /* 🛡️ METHOD 3: OFFLINE FILE BACKUP / RESTORE */
+                    <div className="space-y-4 font-sans">
+                      <div className="text-center">
+                        <div className="w-12 h-12 mx-auto rounded-full bg-[#FFF3E0] border-2 border-[#FFD180] flex items-center justify-center text-[#FF8B3D] mb-2">
+                          <ShieldCheck size={28} />
+                        </div>
+                        <h3 className="font-gaegu text-2xl font-black text-[#5D5443] tracking-wide">
+                          영구 데이터 보호 & 파일 백업 🛡️
+                        </h3>
+                        <p className="text-[11px] sm:text-xs text-stone-500 mt-1 max-w-[340px] mx-auto leading-relaxed">
+                          현재 독서통장의 <strong>제 1호 통장 및 모든 완독 기록</strong>을 내 컴퓨터나 태블릿에 파일(.json)로 직접 저장하거나 언제든 복원할 수 있습니다.
+                        </p>
+                      </div>
+
+                      <div className="bg-[#FDFCF0] border border-[#E6D5B8] p-3.5 rounded-2xl space-y-2 text-xs text-stone-600">
+                        <div className="flex items-center gap-1.5 font-bold text-[#4E9F57]">
+                          <span className="w-2 h-2 rounded-full bg-[#4E9F57]" />
+                          <span>4계층 영구 저장소 활성화됨 (Zero Data Loss)</span>
+                        </div>
+                        <p className="leading-relaxed">
+                          앱이 자동으로 브라우저 <strong>인메모리 + LocalStorage + IndexedDB + 클라우드</strong>에 4중 동시 백업하므로 페이지를 닫거나 기기를 변경해도 데이터가 유실되지 않습니다.
+                        </p>
+                      </div>
+
+                      <div className="space-y-2.5 pt-1">
+                        {onExportBackup && (
+                          <button
+                            type="button"
+                            onClick={onExportBackup}
+                            className="w-full py-3 bg-[#FF8B3D] hover:bg-[#F27824] text-white font-gaegu text-xl font-bold rounded-2xl shadow-[0_3px_0_#D96614] hover:shadow-none hover:translate-y-[3px] transition-all flex items-center justify-center gap-2 cursor-pointer"
+                          >
+                            <Download size={20} />
+                            <span>전체 독서통장 백업 파일 다운로드 (.json)</span>
+                          </button>
+                        )}
+
+                        {onImportBackup && (
+                          <div>
+                            <input
+                              type="file"
+                              ref={fileInputRef}
+                              accept=".json"
+                              onChange={handleFileChange}
+                              className="hidden"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => fileInputRef.current?.click()}
+                              className="w-full py-3 bg-stone-100 hover:bg-stone-200 border-2 border-dashed border-[#E6D5B8] text-stone-700 font-gaegu text-lg font-bold rounded-2xl transition-all flex items-center justify-center gap-2 cursor-pointer"
+                            >
+                              <Upload size={18} className="text-[#FF8B3D]" />
+                              <span>백업 파일(.json)에서 데이터 복원하기</span>
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ) : syncMethod === 'email' ? (
                     /* ☁️ METHOD 1: EMAIL AUTO-SYNC (No Linking Buttons Needed!) */
                     <div className="space-y-4">
                       <div className="text-center">

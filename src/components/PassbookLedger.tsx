@@ -25,9 +25,21 @@ interface PassbookLedgerProps {
   books: BookRecord[];
   onDeleteBook: (id: string) => void;
   onClearAll: () => void;
+  onOpenResetModal?: () => void;
+  onOpenVolumes?: () => void;
+  volumesCount?: number;
+  currentVolume?: number;
 }
 
-export default function PassbookLedger({ books, onDeleteBook, onClearAll }: PassbookLedgerProps) {
+export default function PassbookLedger({
+  books,
+  onDeleteBook,
+  onClearAll,
+  onOpenResetModal,
+  onOpenVolumes,
+  volumesCount = 0,
+  currentVolume = 1
+}: PassbookLedgerProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedScene, setSelectedScene] = useState<string | null>(null);
   
@@ -115,6 +127,34 @@ export default function PassbookLedger({ books, onDeleteBook, onClearAll }: Pass
           )}
         </div>
       </div>
+
+      {/* 30 Books Graduation Banner */}
+      {books.length >= 30 && onOpenResetModal && (
+        <div className="mb-6 p-4 sm:p-5 bg-gradient-to-r from-[#FFF3E0] via-[#FFEBEE] to-[#FFF3E0] border-3 border-[#FF8B3D] rounded-2xl shadow-sm flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="w-12 h-12 rounded-2xl bg-[#E53935] text-white flex items-center justify-center shrink-0 shadow-sm animate-pulse">
+              <Award size={26} />
+            </div>
+            <div>
+              <h3 className="font-gaegu text-2xl font-black text-[#5D5443] flex items-center gap-1.5">
+                <span>🎉 제 {currentVolume}호 통장 30권 완독 달성!</span>
+              </h3>
+              <p className="font-sans text-xs sm:text-sm text-[#8C7E6A] mt-0.5">
+                소중한 30권의 기록을 [완독 보관함]에 안전하게 보관하고, 제 {currentVolume + 1}호 새 통장을 1권부터 시작할 수 있어요!
+              </p>
+            </div>
+          </div>
+
+          <button
+            onClick={onOpenResetModal}
+            id="ledger-reset-milestone-btn"
+            className="w-full sm:w-auto px-5 py-2.5 bg-gradient-to-r from-[#E53935] to-[#FF9800] hover:from-[#C62828] hover:to-[#F57C00] text-white font-gaegu text-xl font-black rounded-xl shadow-md transition-all transform hover:scale-105 active:scale-95 cursor-pointer shrink-0 flex items-center justify-center gap-1.5"
+          >
+            <Sparkles size={18} />
+            <span>새 통장 시작하기 (리셋)</span>
+          </button>
+        </div>
+      )}
 
       {books.length === 0 ? (
         /* Empty ledger state */

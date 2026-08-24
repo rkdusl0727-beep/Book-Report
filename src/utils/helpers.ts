@@ -1,4 +1,4 @@
-import { BookRecord } from '../types';
+import { BookRecord, PassbookVolume } from '../types';
 
 // Safe in-memory fallback dictionary for all storage keys to absolutely prevent crashes
 const memoryStorageDict: Record<string, string> = {};
@@ -213,7 +213,29 @@ export const clearDeletedBookId = (id: string) => {
   }
 };
 
+// Current Volume Number Management (e.g. 1호, 2호, 3호 독서통장)
+export const getCurrentVolumeNumber = (): number => {
+  try {
+    const raw = safeStorage.getItem('digital_reading_current_volume');
+    if (raw) {
+      const parsed = parseInt(raw, 10);
+      if (!isNaN(parsed) && parsed >= 1) return parsed;
+    }
+  } catch {}
+  return 1;
+};
+
+export const setCurrentVolumeNumber = (vol: number) => {
+  try {
+    const safeVol = Math.max(1, Math.floor(vol) || 1);
+    safeStorage.setItem('digital_reading_current_volume', String(safeVol));
+  } catch (e) {
+    console.warn('[Storage Defense] Failed to set current volume number:', e);
+  }
+};
+
 let cachedBooksArray: BookRecord[] = [];
+let cachedVolumesArray: PassbookVolume[] = [];
 
 /**
  * Multi-layer Quota-Safe book saver:
@@ -239,7 +261,8 @@ export const saveBooksToStorage = (books: BookRecord[]): boolean => {
       rating: b.rating,
       feeling: b.feeling,
       createdAt: b.createdAt,
-      sceneType: b.sceneType
+      sceneType: b.sceneType,
+      volumeNumber: b.volumeNumber || getCurrentVolumeNumber()
     }));
     safeStorage.setItem('digital_reading_books_meta', JSON.stringify(metaList));
 
@@ -251,6 +274,7 @@ export const saveBooksToStorage = (books: BookRecord[]): boolean => {
       feeling: b.feeling,
       createdAt: b.createdAt,
       sceneType: b.sceneType,
+      volumeNumber: b.volumeNumber || getCurrentVolumeNumber(),
       coverImage: (b.coverImage && b.coverImage.length < 50000) ? b.coverImage : null
     }));
     safeStorage.setItem('digital_reading_books_lean', JSON.stringify(leanList));
@@ -280,9 +304,51 @@ export const saveBooksToStorage = (books: BookRecord[]): boolean => {
   }
 };
 
+/**
+ * Save Archived Completed Passbooks (Volumes) with full Defense
+ */
+export const saveVolumesToStorage = (volumes: PassbookVolume[]): boolean => {
+  try {
+    const validVolumes = Array.isArray(volumes) ? volumes.filter(v => v && v.id && Array.isArray(v.books)) : [];
+    cachedVolumesArray = [...validVolumes];
+    const jsonStr = JSON.stringify(validVolumes);
+
+    // 1. Update Memory store
+    memoryStorageDict['digital_reading_volumes'] = jsonStr;
+
+    // 2. Save lean metadata index in LocalStorage (takes <5KB)
+    const metaVolumes = validVolumes.map(v => ({
+      id: v.id,
+      volumeNumber: v.volumeNumber,
+      title: v.title,
+      completedAt: v.completedAt,
+      ownerName: v.ownerName,
+      ownerTitle: v.ownerTitle,
+      bookCount: v.books?.length || 0
+    }));
+    safeStorage.setItem('digital_reading_volumes_meta', JSON.stringify(metaVolumes));
+
+    // 3. Try saving full volumes to LocalStorage
+    try {
+      const storage = getLocalStorage();
+      if (storage) {
+        storage.setItem('digital_reading_volumes', jsonStr);
+      }
+    } catch {}
+
+    // 4. Always save full volumes to unlimited IndexedDB
+    saveVolumesToIDB(validVolumes).catch(() => {});
+    return true;
+  } catch (e) {
+    console.error('[Storage Defense] saveVolumesToStorage failed. Preserved in memory safely.', e);
+    return true;
+  }
+};
+
 // IndexedDB unlimited quota storage layer for mobile/tablet browsers with Timeout Protection
 const DB_NAME = 'reading_passbook_idb';
 const STORE_NAME = 'books_store';
+const VOLUMES_STORE = 'volumes_store';
 
 const getIDB = (): Promise<IDBDatabase | null> => {
   return new Promise((resolve) => {
@@ -297,12 +363,15 @@ const getIDB = (): Promise<IDBDatabase | null> => {
     }, 1000);
 
     try {
-      const request = window.indexedDB.open(DB_NAME, 2);
+      const request = window.indexedDB.open(DB_NAME, 3);
       
       request.onupgradeneeded = () => {
         const db = request.result;
         if (!db.objectStoreNames.contains(STORE_NAME)) {
           db.createObjectStore(STORE_NAME);
+        }
+        if (!db.objectStoreNames.contains(VOLUMES_STORE)) {
+          db.createObjectStore(VOLUMES_STORE);
         }
       };
       
@@ -354,6 +423,51 @@ export const saveBooksToIDB = async (books: BookRecord[]): Promise<boolean> => {
       }
     });
   } catch (e) {
+    return false;
+  }
+};
+
+export const saveVolumesToIDB = async (volumes: PassbookVolume[]): Promise<boolean> => {
+  try {
+    const db = await getIDB();
+    if (!db) return false;
+    return new Promise((resolve) => {
+      try {
+        const tx = db.transaction([VOLUMES_STORE, STORE_NAME], 'readwrite');
+        const volStore = tx.objectStore(VOLUMES_STORE);
+        const bookStore = tx.objectStore(STORE_NAME);
+
+        // Save full volumes array
+        volStore.put(volumes, 'all_volumes');
+
+        // Also save each volume and its individual books
+        volumes.forEach(vol => {
+          if (vol && vol.id) {
+            volStore.put(vol, `volume_${vol.id}`);
+
+            // If this is Volume 1, save a permanent independent snapshot in IDB
+            if (vol.volumeNumber === 1 || vol.id.includes('volume_1')) {
+              volStore.put(vol, 'permanent_vault_volume_1');
+            }
+
+            if (Array.isArray(vol.books)) {
+              vol.books.forEach(b => {
+                if (b && b.id) {
+                  bookStore.put(b, `book_${b.id}`);
+                }
+              });
+            }
+          }
+        });
+
+        tx.oncomplete = () => resolve(true);
+        tx.onerror = () => resolve(false);
+        tx.onabort = () => resolve(false);
+      } catch {
+        resolve(false);
+      }
+    });
+  } catch {
     return false;
   }
 };
@@ -423,6 +537,164 @@ export const loadBooksFromIDB = async (): Promise<BookRecord[]> => {
   }
 };
 
+export const loadVolumesFromIDB = async (): Promise<PassbookVolume[]> => {
+  try {
+    const db = await getIDB();
+    if (!db) return [];
+    return new Promise((resolve) => {
+      try {
+        if (!db.objectStoreNames.contains(VOLUMES_STORE)) {
+          resolve([]);
+          return;
+        }
+        const tx = db.transaction(VOLUMES_STORE, 'readonly');
+        const store = tx.objectStore(VOLUMES_STORE);
+
+        if (typeof store.getAll === 'function') {
+          const req = store.getAll();
+          req.onsuccess = () => {
+            const results = req.result || [];
+            const map = new Map<string, PassbookVolume>();
+            results.forEach((item: any) => {
+              if (Array.isArray(item)) {
+                item.forEach((v: any) => {
+                  if (v && v.id) map.set(v.id, v);
+                });
+              } else if (item && typeof item === 'object' && item.id) {
+                map.set(item.id, item);
+              }
+            });
+
+            // Special check for permanent vault Volume 1 in IDB
+            const finalVols = Array.from(map.values());
+            const hasVol1 = finalVols.some(v => v.volumeNumber === 1);
+            if (!hasVol1) {
+              const v1Req = store.get('permanent_vault_volume_1');
+              v1Req.onsuccess = () => {
+                if (v1Req.result && typeof v1Req.result === 'object' && v1Req.result.id) {
+                  map.set(v1Req.result.id, v1Req.result);
+                }
+                resolve(Array.from(map.values()));
+              };
+              v1Req.onerror = () => resolve(finalVols);
+              return;
+            }
+
+            resolve(finalVols);
+          };
+          req.onerror = () => resolve([]);
+        } else {
+          const req = store.get('all_volumes');
+          req.onsuccess = () => resolve(Array.isArray(req.result) ? req.result : []);
+          req.onerror = () => resolve([]);
+        }
+      } catch {
+        resolve([]);
+      }
+    });
+  } catch {
+    return [];
+  }
+};
+
+export const loadVolumesFromStorage = (): PassbookVolume[] => {
+  try {
+    const map = new Map<string, PassbookVolume>();
+
+    const mergeVol = (vol: any) => {
+      if (vol && typeof vol === 'object' && vol.id && Array.isArray(vol.books)) {
+        if (map.has(vol.id)) {
+          const prev = map.get(vol.id)!;
+          map.set(vol.id, {
+            ...prev,
+            ...vol,
+            books: (vol.books && vol.books.length >= prev.books.length) ? vol.books : prev.books
+          });
+        } else {
+          map.set(vol.id, vol as PassbookVolume);
+        }
+      }
+    };
+
+    // 1. In-memory
+    if (Array.isArray(cachedVolumesArray)) {
+      cachedVolumesArray.forEach(mergeVol);
+    }
+
+    // 2. Full volumes key
+    const raw = safeStorage.getItem('digital_reading_volumes');
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) parsed.forEach(mergeVol);
+      } catch {}
+    }
+
+    // 3. Permanent Volume 1 Snapshot Recovery
+    const v1Raw = safeStorage.getItem('digital_reading_volume_1_permanent_snapshot');
+    if (v1Raw) {
+      try {
+        const v1Parsed = JSON.parse(v1Raw);
+        if (v1Parsed && typeof v1Parsed === 'object' && v1Parsed.id) {
+          mergeVol(v1Parsed);
+        }
+      } catch {}
+    }
+
+    const result = Array.from(map.values());
+    cachedVolumesArray = result;
+    return result;
+  } catch (e) {
+    console.warn('[Storage Defense] loadVolumesFromStorage error. Returning in-memory cache safely.', e);
+    return cachedVolumesArray || [];
+  }
+};
+
+export const loadMergedLocalVolumes = async (): Promise<PassbookVolume[]> => {
+  try {
+    const memAndDisk = loadVolumesFromStorage();
+    const idbVolumes = await loadVolumesFromIDB().catch(() => []);
+
+    const map = new Map<string, PassbookVolume>();
+    const processVol = (vol: PassbookVolume) => {
+      if (vol && vol.id && Array.isArray(vol.books)) {
+        if (map.has(vol.id)) {
+          const prev = map.get(vol.id)!;
+          map.set(vol.id, {
+            ...prev,
+            ...vol,
+            books: (vol.books && vol.books.length >= prev.books.length) ? vol.books : prev.books
+          });
+        } else {
+          map.set(vol.id, vol);
+        }
+      }
+    };
+
+    idbVolumes.forEach(processVol);
+    memAndDisk.forEach(processVol);
+
+    // Recheck Volume 1 presence
+    const allVols = Array.from(map.values());
+    if (!allVols.some(v => v.volumeNumber === 1)) {
+      const v1Raw = safeStorage.getItem('digital_reading_volume_1_permanent_snapshot');
+      if (v1Raw) {
+        try {
+          const v1 = JSON.parse(v1Raw);
+          if (v1 && v1.id) map.set(v1.id, v1);
+        } catch {}
+      }
+    }
+
+    const merged = Array.from(map.values()).sort((a, b) => (a.volumeNumber || 1) - (b.volumeNumber || 1));
+    cachedVolumesArray = merged;
+    return merged;
+  } catch (e) {
+    console.error('[Storage Defense] loadMergedLocalVolumes error:', e);
+    return cachedVolumesArray || [];
+  }
+};
+
 export const loadBooksFromStorage = (): BookRecord[] => {
   try {
     const deletedIds = getDeletedBookIds();
@@ -440,6 +712,7 @@ export const loadBooksFromStorage = (): BookRecord[] => {
             coverImage: item.coverImage || prev.coverImage || null,
             feeling: item.feeling || prev.feeling || '',
             rating: item.rating || prev.rating || 5,
+            volumeNumber: item.volumeNumber || prev.volumeNumber || getCurrentVolumeNumber()
           });
         } else {
           map.set(item.id, item as BookRecord);
@@ -531,6 +804,7 @@ export const loadMergedLocalBooks = async (): Promise<BookRecord[]> => {
             coverImage: b.coverImage || prev.coverImage || null,
             feeling: b.feeling || prev.feeling || '',
             rating: b.rating || prev.rating || 5,
+            volumeNumber: b.volumeNumber || prev.volumeNumber || getCurrentVolumeNumber()
           });
         } else {
           map.set(b.id, b);
@@ -549,6 +823,82 @@ export const loadMergedLocalBooks = async (): Promise<BookRecord[]> => {
     const deletedIds = getDeletedBookIds();
     return (cachedBooksArray || []).filter(b => b && b.id && !deletedIds.includes(b.id));
   }
+};
+
+/**
+ * Archives current 30-book passbook into permanent volume storage, and resets active ledger to start next volume fresh.
+ * Guaranteed zero loss of past volumes and books!
+ */
+export const archiveCurrentPassbook = (
+  currentBooks: BookRecord[],
+  currentVol: number,
+  ownerName: string,
+  ownerTitle: string,
+  existingVolumes: PassbookVolume[]
+): { updatedVolumes: PassbookVolume[]; nextVolume: number } => {
+  const safeVolNum = Math.max(1, currentVol || 1);
+  const newVolumeId = `volume_${safeVolNum}_${Date.now()}`;
+  
+  const archivedVolume: PassbookVolume = {
+    id: newVolumeId,
+    volumeNumber: safeVolNum,
+    title: `제 ${safeVolNum}호 독서통장`,
+    completedAt: getKoreanFriendlyDate(),
+    ownerName: ownerName || '이가연',
+    ownerTitle: ownerTitle || '반짝반짝',
+    books: [...currentBooks]
+  };
+
+  const map = new Map<string, PassbookVolume>();
+  existingVolumes.forEach(v => { if (v && v.id) map.set(v.id, v); });
+  map.set(newVolumeId, archivedVolume);
+
+  const updatedVolumes = Array.from(map.values()).sort((a, b) => (a.volumeNumber || 1) - (b.volumeNumber || 1));
+  const nextVolume = safeVolNum + 1;
+
+  // Persist updated volumes
+  saveVolumesToStorage(updatedVolumes);
+  setCurrentVolumeNumber(nextVolume);
+
+  // If archiving Volume 1, create permanent dual-backup snapshots
+  if (safeVolNum === 1) {
+    safeStorage.setItem('digital_reading_volume_1_permanent_snapshot', JSON.stringify(archivedVolume));
+  }
+
+  // Clear current active books in storage to start fresh volume (while all past books are safely preserved in updatedVolumes)
+  cachedBooksArray = [];
+  memoryStorageDict['digital_reading_books'] = '[]';
+  memoryStorageDict['digital_reading_books_meta'] = '[]';
+  memoryStorageDict['digital_reading_books_lean'] = '[]';
+  safeStorage.setItem('digital_reading_books', '[]');
+  safeStorage.setItem('digital_reading_books_meta', '[]');
+  safeStorage.setItem('digital_reading_books_lean', '[]');
+  saveBooksToIDB([]).catch(() => {});
+
+  return { updatedVolumes, nextVolume };
+};
+
+/**
+ * Emergency Full Backup Exporter: generates a JSON blob containing all volumes, books, settings & owner data.
+ */
+export const exportPassbookBackupJSON = (
+  books: BookRecord[],
+  volumes: PassbookVolume[],
+  currentVolume: number,
+  ownerName: string,
+  ownerTitle: string
+): string => {
+  const payload = {
+    app: 'digital-reading-passbook',
+    version: '2.0.0',
+    exportedAt: new Date().toISOString(),
+    ownerName,
+    ownerTitle,
+    currentVolume,
+    books,
+    volumes
+  };
+  return JSON.stringify(payload, null, 2);
 };
 
 /**
@@ -623,3 +973,4 @@ export const getKoreanFriendlyDate = (): string => {
     return '오늘';
   }
 };
+

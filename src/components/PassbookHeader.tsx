@@ -1,5 +1,5 @@
 import { motion } from 'motion/react';
-import { BookOpen, PiggyBank, Edit3, Check, Award, Sprout, RefreshCw } from 'lucide-react';
+import { BookOpen, PiggyBank, Edit3, Check, Award, Sprout, RefreshCw, Trophy, Sparkles } from 'lucide-react';
 import { useState } from 'react';
 
 interface PassbookHeaderProps {
@@ -12,6 +12,10 @@ interface PassbookHeaderProps {
   syncCode: string | null;
   onOpenSync: () => void;
   userEmail?: string | null;
+  currentVolume?: number;
+  volumesCount?: number;
+  onOpenVolumes?: () => void;
+  onOpenResetModal?: () => void;
 }
 
 // Dynamic Grade helper based on bookCount to keep children motivated!
@@ -133,7 +137,11 @@ export default function PassbookHeader({
   setActiveTab,
   syncCode,
   onOpenSync,
-  userEmail
+  userEmail,
+  currentVolume = 1,
+  volumesCount = 0,
+  onOpenVolumes,
+  onOpenResetModal
 }: PassbookHeaderProps) {
   const [isEditingName, setIsEditingName] = useState(false);
   const [nameInput, setNameInput] = useState(ownerName);
@@ -170,6 +178,11 @@ export default function PassbookHeader({
 
           <div className="flex-1 flex flex-col items-center sm:items-start text-center sm:text-left gap-2 w-full mt-1">
             <div className="flex items-center gap-2 flex-wrap justify-center sm:justify-start w-full">
+              {/* Volume Badge */}
+              <span className="px-2.5 py-0.5 bg-[#FFF3E0] text-[#E65100] border border-[#FFE0B2] rounded-full font-gaegu text-sm sm:text-base font-black shrink-0 shadow-xs">
+                제 {currentVolume}호 통장
+              </span>
+
               {isEditingName ? (
                 <div className="flex items-center gap-1.5 flex-wrap justify-center sm:justify-start">
                   {/* Name field (이름) */}
@@ -240,8 +253,21 @@ export default function PassbookHeader({
                 </span>
               </div>
 
-              {/* Connection / Sync Buttons */}
+              {/* Connection / Sync / Archive Buttons */}
               <div className="flex items-center gap-2 flex-wrap justify-center sm:justify-start w-full mt-1.5">
+                {/* Archived Volumes Button */}
+                {onOpenVolumes && (
+                  <button
+                    onClick={onOpenVolumes}
+                    id="open-volumes-btn"
+                    className="font-bold text-[#5D5443] bg-[#F5F5DC] hover:bg-[#EAE8CE] border border-[#E6D5B8] px-2.5 py-0.5 rounded-lg flex items-center gap-1 text-[11px] sm:text-xs transition-colors cursor-pointer shadow-xs"
+                    title="완독 통장 보관함 (명예의 전당)"
+                  >
+                    <Trophy size={11} className="text-[#FF8B3D] shrink-0" />
+                    <span>완독 보관함 {volumesCount > 0 ? `(${volumesCount}권)` : ''}</span>
+                  </button>
+                )}
+
                 {userEmail ? (
                   <button
                     onClick={onOpenSync}
@@ -288,6 +314,19 @@ export default function PassbookHeader({
                 <span className="font-gaegu text-xl text-[#4A4439] font-bold leading-none">/ 30권</span>
               </div>
             </div>
+
+            {/* 30 Books Graduation / Reset button */}
+            {bookCount >= 30 && onOpenResetModal && (
+              <button
+                onClick={onOpenResetModal}
+                id="reset-milestone-btn"
+                className="px-3 py-1 bg-gradient-to-r from-[#E53935] to-[#FF9800] hover:from-[#C62828] hover:to-[#F57C00] text-white font-gaegu text-base font-black rounded-xl shadow-md animate-bounce cursor-pointer flex items-center gap-1"
+                title="30권 완독 보관하고 새 통장 시작하기"
+              >
+                <Sparkles size={14} />
+                <span>새 통장 시작하기</span>
+              </button>
+            )}
           </div>
 
           {/* Gamified 0 to 30 Progress Road */}

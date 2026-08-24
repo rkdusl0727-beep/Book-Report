@@ -6,6 +6,7 @@ interface CelebrationModalProps {
   onClose: () => void;
   ownerName: string;
   bookCount: number;
+  onStartNextVolume?: () => void;
 }
 
 // Custom Premium 3D Glossy Badge component for high visibility
@@ -60,7 +61,8 @@ export default function CelebrationModal({
   isOpen,
   onClose,
   ownerName,
-  bookCount
+  bookCount,
+  onStartNextVolume
 }: CelebrationModalProps) {
   // Determine dynamic award title and customized text depending on bookCount milestone
   const getAwardDetails = (count: number) => {
@@ -192,6 +194,30 @@ export default function CelebrationModal({
                     </div>
                   </div>
                 </div>
+
+                {/* 30 Books Graduation / Reset Action Button */}
+                {bookCount >= 30 && onStartNextVolume && (
+                  <motion.div
+                    initial={{ scale: 0.9, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    className="mt-5 w-full flex flex-col items-center"
+                  >
+                    <button
+                      onClick={() => {
+                        onClose();
+                        onStartNextVolume();
+                      }}
+                      id="celebration-next-volume-btn"
+                      className="w-full py-3.5 px-6 bg-gradient-to-r from-[#E53935] via-[#FF5722] to-[#FF9800] hover:from-[#C62828] hover:to-[#F57C00] text-white font-gaegu text-xl sm:text-2xl font-black rounded-2xl shadow-lg hover:shadow-xl transform hover:scale-[1.02] active:scale-95 transition-all cursor-pointer flex items-center justify-center gap-2 border-2 border-white"
+                    >
+                      <Sparkles size={20} className="animate-spin" />
+                      <span>🎉 30권 보관하고 새 통장 시작하기</span>
+                    </button>
+                    <span className="font-sans text-[11px] text-[#8C7E6A] mt-1.5 font-medium">
+                      * 지금까지의 30권 기록은 [완독 보관함]에 안전하게 평생 보관됩니다!
+                    </span>
+                  </motion.div>
+                )}
               </div>
             </div>
           </motion.div>
