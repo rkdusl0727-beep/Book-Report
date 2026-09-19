@@ -15,16 +15,39 @@ async function startServer() {
   app.use(express.json({ limit: '100mb' }));
   app.use(express.urlencoded({ limit: '100mb', extended: true }));
 
+  // CORS: lets the frontend call this API from a different origin (e.g. a Netlify-hosted
+  // client talking to this server on Render/Railway/Fly). Harmless and inert when the
+  // frontend is served from this same origin instead. No cookies/credentials are used for
+  // auth here (email+password and sync codes travel in the request body), so a permissive
+  // origin is safe — set ALLOWED_ORIGIN to lock it down to one specific frontend URL instead.
+  app.use((req, res, next) => {
+    res.header('Access-Control-Allow-Origin', process.env.ALLOWED_ORIGIN || '*');
+    res.header('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Content-Type');
+    if (req.method === 'OPTIONS') {
+      res.sendStatus(204);
+      return;
+    }
+    next();
+  });
+
   // Global exception handling middleware to prevent server crashes under high traffic or unexpected payloads
   app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
     console.error("[Server Defense] Unhandled Error Caught:", err);
     res.status(500).json({ success: false, error: "서버 처리 중 일시적인 오류가 발생했습니다. 잠시 후 다시 시도해 주세요." });
   });
 
-  const STORE_FILE = path.join(process.cwd(), 'sync_store.json');
-  const BACKUP_FILE_1 = path.join(process.cwd(), 'sync_store_snapshot_1.json');
-  const BACKUP_FILE_2 = path.join(process.cwd(), 'sync_store_snapshot_2.json');
-  const PERMANENT_VAULT_FILE = path.join(process.cwd(), 'sync_store_permanent_vault.json');
+  // DATA_DIR lets the sync store live on a mounted persistent disk (e.g. Render's paid
+  // plans, which back a disk at a fixed path) instead of the app's own ephemeral working
+  // directory — on hosts that wipe the filesystem between deploys/restarts, that's the
+  // difference between cloud-synced data surviving and not. Defaults to cwd for local dev
+  // and any host with a durable filesystem.
+  const DATA_DIR = process.env.DATA_DIR || process.cwd();
+  try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch {}
+  const STORE_FILE = path.join(DATA_DIR, 'sync_store.json');
+  const BACKUP_FILE_1 = path.join(DATA_DIR, 'sync_store_snapshot_1.json');
+  const BACKUP_FILE_2 = path.join(DATA_DIR, 'sync_store_snapshot_2.json');
+  const PERMANENT_VAULT_FILE = path.join(DATA_DIR, 'sync_store_permanent_vault.json');
 
   // Helper to read sync store with multi-snapshot auto-recovery
   const readStore = () => {
@@ -513,11 +536,20 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
+    // Only serve the built client if it's actually present. When this server is deployed
+    // as an API-only backend (e.g. on Render, with the frontend deployed separately to
+    // Netlify), `dist/` was never built here — skip straight to just running the /api/*
+    // routes above instead of registering a catch-all that would 500 on every request.
     const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
+    const distIndexHtml = path.join(distPath, 'index.html');
+    if (fs.existsSync(distIndexHtml)) {
+      app.use(express.static(distPath));
+      app.get('*', (req, res) => {
+        res.sendFile(distIndexHtml);
+      });
+    } else {
+      console.log('[Server] No dist/ build found — running as an API-only backend (no static client to serve).');
+    }
   }
 
   app.listen(PORT, "0.0.0.0", () => {

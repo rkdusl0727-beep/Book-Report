@@ -1,0 +1,13 @@
+[build]
+  command = "npm run build:client"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+# Single-page app: every path serves index.html so the app can boot and handle its own
+# in-app tab state (there is no server-side routing to preserve).
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

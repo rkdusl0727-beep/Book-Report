@@ -27,6 +27,14 @@ import ArchivedVolumesModal from './components/ArchivedVolumesModal';
 import { Sparkles, Star, Heart, Trophy } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
+// Backend base URL. Empty string means "same origin as the frontend" (the default: a
+// single server serving both, or local dev via the Vite proxy). Set VITE_API_BASE_URL
+// at build time when the frontend and backend are deployed to different origins — e.g.
+// the client on Netlify talking to the API on Render — so every /api/* call below goes
+// to the right place.
+const API_BASE = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/+$/, '');
+const apiUrl = (path: string) => `${API_BASE}${path}`;
+
 export default function App() {
   // Reading records states
   const [books, setBooks] = useState<BookRecord[]>([]);
@@ -212,7 +220,7 @@ export default function App() {
     // 1. Account Sync
     if (activeEmail) {
       try {
-        const res = await fetch(`/api/auth/user/${encodeURIComponent(activeEmail.trim().toLowerCase())}`);
+        const res = await fetch(apiUrl(`/api/auth/user/${encodeURIComponent(activeEmail.trim().toLowerCase())}`));
         if (res.ok) {
           const data = await res.json();
           if (data.success) {
@@ -255,7 +263,7 @@ export default function App() {
     } else if (activeCode) {
       // 2. Code Sync
       try {
-        const res = await fetch(`/api/sync/load/${encodeURIComponent(activeCode.trim().toUpperCase())}`);
+        const res = await fetch(apiUrl(`/api/sync/load/${encodeURIComponent(activeCode.trim().toUpperCase())}`));
         if (res.ok) {
           const data = await res.json();
           if (data.success) {
@@ -298,7 +306,7 @@ export default function App() {
     } else {
       // 3. Anonymous Device Cloud Auto-Backup (Ensures 100% data preservation even without login)
       try {
-        const res = await fetch(`/api/device/load/${encodeURIComponent(deviceId)}`);
+        const res = await fetch(apiUrl(`/api/device/load/${encodeURIComponent(deviceId)}`));
         if (res.ok) {
           const data = await res.json();
           if (data.success) {
@@ -482,7 +490,7 @@ export default function App() {
     const volNumToSync = volNumber !== undefined ? volNumber : currentVolumeRef.current;
 
     // 0. Universal Anonymous Device Backup (Always runs in background to prevent any data loss!)
-    fetch('/api/device/save', {
+    fetch(apiUrl('/api/device/save'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -499,7 +507,7 @@ export default function App() {
 
     // 1. Account sync (prioritized)
     if (email) {
-      fetch('/api/auth/save', {
+      fetch(apiUrl('/api/auth/save'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -521,7 +529,7 @@ export default function App() {
 
     // 2. Legacy code sync (backward compatibility)
     if (code) {
-      fetch('/api/sync/save', {
+      fetch(apiUrl('/api/sync/save'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -589,7 +597,7 @@ export default function App() {
   const handleCreateSyncCode = async () => {
     setIsSyncing(true);
     try {
-      const res = await fetch('/api/sync/create', {
+      const res = await fetch(apiUrl('/api/sync/create'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -623,7 +631,7 @@ export default function App() {
     setIsSyncing(true);
     const upperInput = code.trim().toUpperCase();
     try {
-      const res = await fetch(`/api/sync/load/${upperInput}`);
+      const res = await fetch(apiUrl(`/api/sync/load/${upperInput}`));
       if (!res.ok) {
         const errData = await res.json();
         showCustomAlert('연동 실패 ❌', errData.error || '존재하지 않는 코드예요. 다시 한 번 확인해 주세요.', 'warning');
@@ -676,7 +684,7 @@ export default function App() {
     setIsSyncing(true);
     const normalizedEmail = email.trim().toLowerCase();
     try {
-      const res = await fetch('/api/auth/register', {
+      const res = await fetch(apiUrl('/api/auth/register'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -709,7 +717,7 @@ export default function App() {
     setIsSyncing(true);
     const normalizedEmail = email.trim().toLowerCase();
     try {
-      const res = await fetch('/api/auth/login', {
+      const res = await fetch(apiUrl('/api/auth/login'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: normalizedEmail, password: pass.trim() })
