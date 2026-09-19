@@ -213,7 +213,12 @@ export default function ArchivedVolumesModal({ isOpen, onClose, volumes, current
                   </div>
 
                   <div className="space-y-4">
-                    {selectedVolume.books.map((book, idx) => (
+                    {/* selectedVolume.books is stored newest-first (it's a snapshot of the
+                        live ledger, which prepends each new deposit); reverse it here so
+                        #1 is the first book actually read in this passbook and the numbers
+                        climb in real reading order, ending at #{books.length} for the book
+                        that completed the volume. */}
+                    {[...selectedVolume.books].reverse().map((book, idx) => (
                       <div
                         key={book.id || idx}
                         className="bg-white border-2 border-[#E6D5B8] rounded-2xl p-4 flex flex-col sm:flex-row gap-4 relative overflow-hidden shadow-xs"

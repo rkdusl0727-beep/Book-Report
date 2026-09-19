@@ -6,3 +6,7 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Local dev sync store & its rolling backups/permanent vault (runtime-generated user data —
+# never something to commit)
+sync_store*.json

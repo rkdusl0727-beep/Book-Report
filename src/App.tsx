@@ -53,7 +53,19 @@ export default function App() {
 
   const [ownerName, setOwnerName] = useState<string>('이가연');
   const [ownerTitle, setOwnerTitle] = useState<string>('반짝반짝');
+  const ownerNameRef = useRef<string>('이가연');
+  const ownerTitleRef = useRef<string>('반짝반짝');
   const [activeTab, setActiveTab] = useState<ActiveTab>('deposit');
+
+  // Keep owner refs synced so long-lived closures (e.g. the pagehide/beforeunload flush
+  // below, which only rebinds when userEmail/syncCode change) never read a stale name.
+  useEffect(() => {
+    ownerNameRef.current = ownerName;
+  }, [ownerName]);
+
+  useEffect(() => {
+    ownerTitleRef.current = ownerTitle;
+  }, [ownerTitle]);
 
   // Modal states
   const [showCelebration, setShowCelebration] = useState(false);
@@ -141,6 +153,56 @@ export default function App() {
     return Array.from(map.values()).sort((a, b) => (a.volumeNumber || 1) - (b.volumeNumber || 1));
   };
 
+  // When an incoming snapshot (cloud pull, sync-code connect, account login, or a restored
+  // backup file) reports an OLDER currentVolume than this device already has, its `books`
+  // describe a passbook this device already archived into [완독 보관함] — merging them into
+  // the active ledger would resurrect books the user intentionally closed out (this is the
+  // exact scenario that used to let an archived passbook silently reappear after a sync).
+  // We must also never silently drop a book that only exists in that incoming snapshot, so
+  // instead of discarding it we fold anything missing into the archived volume it actually
+  // belongs to, leaving the active books/current volume completely untouched.
+  const reconcileStaleSnapshotBooks = (
+    incomingBooks: BookRecord[],
+    incomingVolNum: number,
+    volumes: PassbookVolume[]
+  ): PassbookVolume[] => {
+    if (!incomingBooks || incomingBooks.length === 0) return volumes;
+    const idx = volumes.findIndex(v => v.volumeNumber === incomingVolNum);
+    if (idx === -1) return volumes; // no local archived volume to fold these into (shouldn't normally happen)
+
+    const target = volumes[idx];
+    const existingIds = new Set((target.books || []).map(b => b && b.id));
+    const missing = incomingBooks.filter(b => b && b.id && !existingIds.has(b.id));
+    if (missing.length === 0) return volumes;
+
+    const updated = [...volumes];
+    updated[idx] = { ...target, books: [...(target.books || []), ...missing] };
+    return updated;
+  };
+
+  // Shared merge entry point for every place we pull in an outside snapshot of books/volumes
+  // (cloud poll, sync-code connect, account login, backup restore). Applies the stale-volume
+  // guard above uniformly so an archived passbook can never be re-opened by an out-of-date
+  // sync — the ledger can keep accumulating indefinitely past 30 books, and no past record,
+  // active or archived, is ever silently lost.
+  const mergeIncomingSnapshot = (
+    incomingBooks: BookRecord[],
+    incomingVolumes: PassbookVolume[],
+    incomingVolNum: number,
+    currentLocalBooks: BookRecord[],
+    currentLocalVolumes: PassbookVolume[],
+    memoryBooks: BookRecord[] = [],
+    memoryVolumes: PassbookVolume[] = []
+  ): { mergedBooks: BookRecord[]; mergedVolumes: PassbookVolume[] } => {
+    const isStale = incomingVolNum < currentVolumeRef.current;
+    const mergedBooks = mergeBooks(isStale ? [] : incomingBooks, currentLocalBooks, memoryBooks);
+    let mergedVolumes = mergeVolumes(incomingVolumes, currentLocalVolumes, memoryVolumes);
+    if (isStale) {
+      mergedVolumes = reconcileStaleSnapshotBooks(incomingBooks, incomingVolNum, mergedVolumes);
+    }
+    return { mergedBooks, mergedVolumes };
+  };
+
   // Helper to fetch latest data from cloud with lossless merging
   const fetchLatestFromCloud = async (silent = true) => {
     const activeEmail = safeStorage.getItem('digital_reading_user_email') || userEmail;
@@ -161,8 +223,9 @@ export default function App() {
             const memoryBooks = booksRef.current;
             const memoryVolumes = volumesRef.current;
 
-            const mergedBooks = mergeBooks(cloudBooks, currentLocalBooks, memoryBooks);
-            const mergedVolumes = mergeVolumes(cloudVolumes, currentLocalVolumes, memoryVolumes);
+            const { mergedBooks, mergedVolumes } = mergeIncomingSnapshot(
+              cloudBooks, cloudVolumes, data.currentVolume || 1, currentLocalBooks, currentLocalVolumes, memoryBooks, memoryVolumes
+            );
             const nextVol = Math.max(data.currentVolume || 1, currentVolumeRef.current, getCurrentVolumeNumber());
 
             setBooks(mergedBooks);
@@ -203,8 +266,9 @@ export default function App() {
             const memoryBooks = booksRef.current;
             const memoryVolumes = volumesRef.current;
 
-            const mergedBooks = mergeBooks(cloudBooks, currentLocalBooks, memoryBooks);
-            const mergedVolumes = mergeVolumes(cloudVolumes, currentLocalVolumes, memoryVolumes);
+            const { mergedBooks, mergedVolumes } = mergeIncomingSnapshot(
+              cloudBooks, cloudVolumes, data.currentVolume || 1, currentLocalBooks, currentLocalVolumes, memoryBooks, memoryVolumes
+            );
             const nextVol = Math.max(data.currentVolume || 1, currentVolumeRef.current, getCurrentVolumeNumber());
 
             setBooks(mergedBooks);
@@ -245,8 +309,9 @@ export default function App() {
             const memoryBooks = booksRef.current;
             const memoryVolumes = volumesRef.current;
 
-            const mergedBooks = mergeBooks(cloudBooks, currentLocalBooks, memoryBooks);
-            const mergedVolumes = mergeVolumes(cloudVolumes, currentLocalVolumes, memoryVolumes);
+            const { mergedBooks, mergedVolumes } = mergeIncomingSnapshot(
+              cloudBooks, cloudVolumes, data.currentVolume || 1, currentLocalBooks, currentLocalVolumes, memoryBooks, memoryVolumes
+            );
             const nextVol = Math.max(data.currentVolume || 1, currentVolumeRef.current, getCurrentVolumeNumber());
 
             if (mergedBooks.length > 0) {
@@ -287,15 +352,23 @@ export default function App() {
 
       if (mergedInitialBooks.length > 0) {
         setBooks(mergedInitialBooks);
+        booksRef.current = mergedInitialBooks;
         saveBooksToStorage(mergedInitialBooks);
       }
 
       if (mergedInitialVolumes.length > 0) {
         setVolumes(mergedInitialVolumes);
+        volumesRef.current = mergedInitialVolumes;
         saveVolumesToStorage(mergedInitialVolumes);
       }
 
+      // Sync the ref immediately (not just the state) — fetchLatestFromCloud below runs
+      // later in this very same tick, before React has a chance to flush the `useEffect`
+      // that normally keeps currentVolumeRef in sync with `currentVolume`. Without this,
+      // the very first cloud fetch on app launch could see a stale ref stuck at the
+      // default `1` and wrongly treat an already-archived volume's cloud data as current.
       setCurrentVolume(currentVolNum);
+      currentVolumeRef.current = currentVolNum;
 
       const storedName = safeStorage.getItem('digital_reading_owner_name');
       const storedTitle = safeStorage.getItem('digital_reading_owner_title');
@@ -325,20 +398,36 @@ export default function App() {
 
   // Periodic cloud poll + fetch on tab focus / visibility change / pageshow / popstate (back navigation defense)
   useEffect(() => {
-    const handleFocus = async () => {
-      // 1. Instantly merge disk, IndexedDB & in-memory state on navigation/focus to prevent UI drops
-      const currentLocalBooks = await loadMergedLocalBooks();
-      const currentMemoryBooks = booksRef.current;
-      const mergedBooks = mergeBooks([], currentLocalBooks, currentMemoryBooks);
-      setBooks(mergedBooks);
+    // Phones/tablets often fire several of these events almost simultaneously on a single
+    // "came back to the tab" moment (focus + visibilitychange + pageshow all at once).
+    // Each run is async (IndexedDB + a network fetch), so without this guard, overlapping
+    // runs could resolve out of order and the run based on an older `booksRef.current`
+    // snapshot could win the race and clobber a newer one with setBooks — collapsing
+    // concurrent calls into one in-flight promise removes that risk entirely.
+    let inFlight: Promise<void> | null = null;
+    const handleFocus = () => {
+      if (inFlight) return inFlight;
+      inFlight = (async () => {
+        try {
+          // 1. Instantly merge disk, IndexedDB & in-memory state on navigation/focus to
+          // prevent UI drops. Re-read the memory refs AFTER the (async) disk reads, not
+          // before, so a book added on this device while this merge was in flight is
+          // never overwritten by a snapshot taken before it existed.
+          const currentLocalBooks = await loadMergedLocalBooks();
+          const mergedBooks = mergeBooks([], currentLocalBooks, booksRef.current);
+          setBooks(mergedBooks);
 
-      const currentLocalVolumes = await loadMergedLocalVolumes();
-      const currentMemoryVolumes = volumesRef.current;
-      const mergedVols = mergeVolumes([], currentLocalVolumes, currentMemoryVolumes);
-      setVolumes(mergedVols);
+          const currentLocalVolumes = await loadMergedLocalVolumes();
+          const mergedVols = mergeVolumes([], currentLocalVolumes, volumesRef.current);
+          setVolumes(mergedVols);
 
-      // 2. Fetch latest from cloud with lossless 3-way merging
-      fetchLatestFromCloud(true);
+          // 2. Fetch latest from cloud with lossless 3-way merging
+          await fetchLatestFromCloud(true);
+        } finally {
+          inFlight = null;
+        }
+      })();
+      return inFlight;
     };
 
     const handleFlushState = () => {
@@ -348,7 +437,7 @@ export default function App() {
       if (volumesRef.current && volumesRef.current.length > 0) {
         saveVolumesToStorage(volumesRef.current);
       }
-      triggerAutoSync(userEmail, syncCode, booksRef.current, ownerName, ownerTitle, false, volumesRef.current, currentVolumeRef.current);
+      triggerAutoSync(userEmail, syncCode, booksRef.current, ownerNameRef.current, ownerTitleRef.current, false, volumesRef.current, currentVolumeRef.current);
     };
 
     window.addEventListener('focus', handleFocus);
@@ -474,8 +563,13 @@ export default function App() {
     setBooks([]);
     booksRef.current = [];
 
-    // Trigger auto-sync to backend immediately
-    triggerAutoSync(userEmail, syncCode, [], ownerName, ownerTitle, false, updatedVolumes, nextVolume);
+    // Trigger auto-sync to backend immediately.
+    // isClearAll MUST be true here: the server treats an empty `books` payload with no
+    // deletedIds as an "accidental empty save" and silently keeps the OLD books to protect
+    // against data loss. Since we just archived those books into `volumes`, we need to tell
+    // the server this empty state is intentional — otherwise the archived books resurface in
+    // the new (reset) passbook on the very next cloud sync.
+    triggerAutoSync(userEmail, syncCode, [], ownerName, ownerTitle, true, updatedVolumes, nextVolume);
 
     setShowResetVolumeModal(false);
     setShowCelebration(false);
@@ -539,8 +633,9 @@ export default function App() {
       if (data.success) {
         const currentLocalBooks = await loadMergedLocalBooks();
         const currentLocalVolumes = await loadMergedLocalVolumes();
-        const mergedBooks = mergeBooks(data.books || [], currentLocalBooks);
-        const mergedVolumes = mergeVolumes(data.volumes || [], currentLocalVolumes);
+        const { mergedBooks, mergedVolumes } = mergeIncomingSnapshot(
+          data.books || [], data.volumes || [], data.currentVolume || 1, currentLocalBooks, currentLocalVolumes
+        );
         const nextVol = Math.max(data.currentVolume || 1, currentVolumeRef.current, getCurrentVolumeNumber());
 
         setBooks(mergedBooks);
@@ -626,8 +721,9 @@ export default function App() {
         // Merge any local offline books & volumes on this device with cloud data
         const currentLocalBooks = await loadMergedLocalBooks();
         const currentLocalVolumes = await loadMergedLocalVolumes();
-        const mergedBooks = mergeBooks(data.books || [], currentLocalBooks);
-        const mergedVolumes = mergeVolumes(data.volumes || [], currentLocalVolumes);
+        const { mergedBooks, mergedVolumes } = mergeIncomingSnapshot(
+          data.books || [], data.volumes || [], data.currentVolume || 1, currentLocalBooks, currentLocalVolumes
+        );
         const nextVol = Math.max(data.currentVolume || 1, currentVolumeRef.current, getCurrentVolumeNumber());
 
         const finalName = data.ownerName || ownerName;
@@ -709,8 +805,9 @@ export default function App() {
         const currentLocalBooks = await loadMergedLocalBooks();
         const currentLocalVolumes = await loadMergedLocalVolumes();
 
-        const mergedBooks = mergeBooks(incomingBooks, currentLocalBooks, booksRef.current);
-        const mergedVolumes = mergeVolumes(incomingVolumes, currentLocalVolumes, volumesRef.current);
+        const { mergedBooks, mergedVolumes } = mergeIncomingSnapshot(
+          incomingBooks, incomingVolumes, parsed.currentVolume || 1, currentLocalBooks, currentLocalVolumes, booksRef.current, volumesRef.current
+        );
         const nextVol = Math.max(parsed.currentVolume || 1, currentVolumeRef.current, getCurrentVolumeNumber());
 
         const finalName = parsed.ownerName || ownerName;

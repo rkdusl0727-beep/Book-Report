@@ -33,6 +33,10 @@ export default function BookDepositForm({ onAddBook }: BookDepositFormProps) {
   const audioChunksRef = useRef<Blob[]>([]);
   const recordingTimerRef = useRef<NodeJS.Timeout | null>(null);
   const playbackAudioRef = useRef<HTMLAudioElement | null>(null);
+  // Mirrors `isRecording` state so the setInterval callback below (created once inside
+  // startRecording) always reads the live value instead of the stale `false` it closed
+  // over at creation time — without this, the 20-second auto-stop silently never fires.
+  const isRecordingRef = useRef(false);
   const coverInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const sceneInputRef = useRef<HTMLInputElement>(null);
@@ -142,6 +146,7 @@ export default function BookDepositForm({ onAddBook }: BookDepositFormProps) {
 
       mediaRecorder.start();
       setIsRecording(true);
+      isRecordingRef.current = true;
 
       // Start 20-seconds countdown limit timer to fit inside LocalStorage!
       recordingTimerRef.current = setInterval(() => {
@@ -161,8 +166,13 @@ export default function BookDepositForm({ onAddBook }: BookDepositFormProps) {
   };
 
   const stopRecording = () => {
-    if (mediaRecorderRef.current && isRecording) {
+    // Uses the ref (not the `isRecording` state) because this function is also invoked
+    // from inside the setInterval callback created in startRecording, which closes over
+    // whichever render was active at that moment (isRecording === false there forever) —
+    // reading the ref instead avoids that stale-closure trap.
+    if (mediaRecorderRef.current && isRecordingRef.current) {
       mediaRecorderRef.current.stop();
+      isRecordingRef.current = false;
       setIsRecording(false);
       if (recordingTimerRef.current) {
         clearInterval(recordingTimerRef.current);

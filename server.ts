@@ -5,7 +5,11 @@ import fs from "fs";
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  // Respect the platform-assigned port (Cloud Run, Render, Railway, etc. all inject PORT
+  // and expect the server to bind to it) — hardcoding 3000 would make the deployed backend
+  // unreachable there, which looks exactly like "sync doesn't work / old records vanish"
+  // from the client's point of view, since every /api/* call would simply never land.
+  const PORT = Number(process.env.PORT) || 3000;
 
   // Support up to 100MB payloads so huge collections with dozens of high-res drawings & voice notes never get rejected
   app.use(express.json({ limit: '100mb' }));
@@ -185,6 +189,67 @@ async function startServer() {
     return Array.from(map.values());
   };
 
+  // Folds books from a stale write into the archived volume they actually belong to,
+  // instead of letting them vanish — used only when reconcileIncomingSave (below) has
+  // already decided a write's currentVolume is behind what's stored.
+  const foldBooksIntoVolume = (volumes: any[], volNum: number, books: any[]): any[] => {
+    const idx = volumes.findIndex((v) => v && v.volumeNumber === volNum);
+    if (idx === -1) return volumes;
+    const target = volumes[idx];
+    const existingIds = new Set((target.books || []).map((b: any) => b && b.id));
+    const missing = (books || []).filter((b) => b && b.id && !existingIds.has(b.id));
+    if (missing.length === 0) return volumes;
+    const updated = [...volumes];
+    updated[idx] = { ...target, books: [...(target.books || []), ...missing] };
+    return updated;
+  };
+
+  // Shared write-reconciliation for all three save endpoints (account/code/device).
+  //
+  // Every client keeps polling and auto-saving in the background, so a device that hasn't
+  // yet learned about a just-completed archive (handleArchiveAndStartNextVolume on another
+  // device, or even this same device a few seconds earlier) can still land a write here
+  // carrying an OLDER currentVolume and that old volume's full book list. Blindly merging
+  // that in — as this endpoint used to — re-adds already-archived books to "current books"
+  // and, worse, stomps `currentVolume` back down to the stale value the very next time
+  // anyone reads it back. That combination is exactly what shows up on the client as
+  // "책 목록이 지워지기도 해": an archived passbook reappearing and the volume counter
+  // rolling backwards. So: never let currentVolume regress, never merge a stale write's
+  // books into "current", and never drop a book — fold anything the stale write knows
+  // about but the archive doesn't into that archived volume instead.
+  const reconcileIncomingSave = (
+    stored: { books?: any[]; volumes?: any[]; currentVolume?: number },
+    incomingBooks: any[],
+    incomingVolumes: any[],
+    incomingVolNum: number | undefined,
+    deletedIds: string[],
+    isClearAll: boolean
+  ): { finalBooks: any[]; finalVolumes: any[]; nextVolNum: number } => {
+    const storedVolNum = stored.currentVolume || 1;
+    const nextVolNum = Math.max(incomingVolNum || 1, storedVolNum);
+    const isStale = (incomingVolNum || 1) < storedVolNum;
+    const currentBooks = stored.books || [];
+
+    let finalBooks: any[];
+    if (isClearAll) {
+      finalBooks = [];
+    } else if (isStale) {
+      finalBooks = currentBooks;
+    } else if (Array.isArray(incomingBooks) && incomingBooks.length === 0 && (!deletedIds || deletedIds.length === 0)) {
+      // Do NOT wipe existing books on accidental empty payloads
+      finalBooks = currentBooks;
+    } else {
+      finalBooks = mergeBookArrays(currentBooks, incomingBooks || [], deletedIds || []);
+    }
+
+    let finalVolumes = mergeVolumeArrays(stored.volumes || [], incomingVolumes || []);
+    if (isStale && incomingBooks && incomingBooks.length > 0) {
+      finalVolumes = foldBooksIntoVolume(finalVolumes, incomingVolNum || 1, incomingBooks);
+    }
+
+    return { finalBooks, finalVolumes, nextVolNum };
+  };
+
   // API Route: Register
   app.post("/api/auth/register", (req, res) => {
     const { email, password, ownerName, ownerTitle, books, volumes, currentVolume } = req.body;
@@ -274,25 +339,13 @@ async function startServer() {
       return res.status(404).json({ success: false, error: 'User not found' });
     }
 
-    const currentBooks = users[trimmedEmail].books || [];
-    const currentVols = users[trimmedEmail].volumes || [];
-    
-    // Only wipe if user explicitly invoked "Clear All" in UI
-    let finalBooks: any[] = [];
-    if (isClearAll) {
-      finalBooks = [];
-    } else if (Array.isArray(books) && books.length === 0 && (!deletedIds || deletedIds.length === 0)) {
-      // Do NOT wipe existing books on accidental empty payloads
-      finalBooks = currentBooks;
-    } else {
-      finalBooks = mergeBookArrays(currentBooks, books || [], deletedIds || []);
-    }
-
-    const finalVolumes = mergeVolumeArrays(currentVols, volumes || []);
+    const { finalBooks, finalVolumes, nextVolNum } = reconcileIncomingSave(
+      users[trimmedEmail], books, volumes, currentVolume, deletedIds, !!isClearAll
+    );
 
     users[trimmedEmail].books = finalBooks;
     users[trimmedEmail].volumes = finalVolumes;
-    users[trimmedEmail].currentVolume = currentVolume || users[trimmedEmail].currentVolume || 1;
+    users[trimmedEmail].currentVolume = nextVolNum;
     users[trimmedEmail].ownerName = ownerName || users[trimmedEmail].ownerName;
     users[trimmedEmail].ownerTitle = ownerTitle || users[trimmedEmail].ownerTitle;
     users[trimmedEmail].updatedAt = new Date().toISOString();
@@ -348,24 +401,14 @@ async function startServer() {
     const store = readStore();
     const upperCode = String(syncCode).toUpperCase().trim();
     
-    const currentBooks = store[upperCode]?.books || [];
-    const currentVols = store[upperCode]?.volumes || [];
-    
-    let finalBooks: any[] = [];
-    if (isClearAll) {
-      finalBooks = [];
-    } else if (Array.isArray(books) && books.length === 0 && (!deletedIds || deletedIds.length === 0)) {
-      finalBooks = currentBooks;
-    } else {
-      finalBooks = mergeBookArrays(currentBooks, books || [], deletedIds || []);
-    }
-
-    const finalVolumes = mergeVolumeArrays(currentVols, volumes || []);
+    const { finalBooks, finalVolumes, nextVolNum } = reconcileIncomingSave(
+      store[upperCode] || {}, books, volumes, currentVolume, deletedIds, !!isClearAll
+    );
 
     store[upperCode] = {
       books: finalBooks,
       volumes: finalVolumes,
-      currentVolume: currentVolume || store[upperCode]?.currentVolume || 1,
+      currentVolume: nextVolNum,
       ownerName: ownerName || store[upperCode]?.ownerName || '이가연',
       ownerTitle: ownerTitle || store[upperCode]?.ownerTitle || '반짝반짝',
       updatedAt: new Date().toISOString()
@@ -418,24 +461,15 @@ async function startServer() {
 
     const trimmedId = String(deviceId).trim();
     const devices = readDevicesStore();
-    const currentBooks = devices[trimmedId]?.books || [];
-    const currentVols = devices[trimmedId]?.volumes || [];
 
-    let finalBooks: any[] = [];
-    if (isClearAll) {
-      finalBooks = [];
-    } else if (Array.isArray(books) && books.length === 0 && (!deletedIds || deletedIds.length === 0)) {
-      finalBooks = currentBooks;
-    } else {
-      finalBooks = mergeBookArrays(currentBooks, books || [], deletedIds || []);
-    }
-
-    const finalVolumes = mergeVolumeArrays(currentVols, volumes || []);
+    const { finalBooks, finalVolumes, nextVolNum } = reconcileIncomingSave(
+      devices[trimmedId] || {}, books, volumes, currentVolume, deletedIds, !!isClearAll
+    );
 
     devices[trimmedId] = {
       books: finalBooks,
       volumes: finalVolumes,
-      currentVolume: currentVolume || devices[trimmedId]?.currentVolume || 1,
+      currentVolume: nextVolNum,
       ownerName: ownerName || devices[trimmedId]?.ownerName || '이가연',
       ownerTitle: ownerTitle || devices[trimmedId]?.ownerTitle || '반짝반짝',
       updatedAt: new Date().toISOString()

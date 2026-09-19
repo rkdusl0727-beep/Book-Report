@@ -350,21 +350,33 @@ const DB_NAME = 'reading_passbook_idb';
 const STORE_NAME = 'books_store';
 const VOLUMES_STORE = 'volumes_store';
 
-const getIDB = (): Promise<IDBDatabase | null> => {
+// Cache a single shared connection instead of opening (and leaking — it was never closed)
+// a brand-new one on every single read/write. This matters a lot on phones/tablets: every
+// call used to race a fresh indexedDB.open() against a 1000ms timeout, and right after the
+// OS resumes a backgrounded/suspended tab (exactly the "went back, came back" case) that
+// open can genuinely take longer than 1s under memory pressure — the old code would then
+// silently resolve(null) and the app would believe there was no saved data at all, even
+// though it was sitting right there, just not read in time. Reusing one already-open
+// connection means only the very first IDB touch in the whole page lifetime pays that
+// risk; every call afterwards — including the ones right after returning to the tab —
+// resolves instantly with no race.
+let idbConnectionPromise: Promise<IDBDatabase | null> | null = null;
+
+const openIDB = (): Promise<IDBDatabase | null> => {
   return new Promise((resolve) => {
     if (typeof window === 'undefined' || !window.indexedDB) {
       resolve(null);
       return;
     }
 
-    // Safety timeout: 1000ms race so mobile Safari never hangs or blocks app loading
+    // Safety timeout so mobile Safari never hangs or blocks app loading on the first open
     const timer = setTimeout(() => {
       resolve(null);
-    }, 1000);
+    }, 3000);
 
     try {
       const request = window.indexedDB.open(DB_NAME, 3);
-      
+
       request.onupgradeneeded = () => {
         const db = request.result;
         if (!db.objectStoreNames.contains(STORE_NAME)) {
@@ -374,12 +386,18 @@ const getIDB = (): Promise<IDBDatabase | null> => {
           db.createObjectStore(VOLUMES_STORE);
         }
       };
-      
+
       request.onsuccess = () => {
         clearTimeout(timer);
-        resolve(request.result);
+        const db = request.result;
+        // If the connection ever closes/dies (browser-initiated, e.g. under memory
+        // pressure) or another tab needs a version change, drop the cache so the next
+        // call transparently opens a fresh connection instead of reusing a dead one.
+        db.onclose = () => { idbConnectionPromise = null; };
+        db.onversionchange = () => { db.close(); idbConnectionPromise = null; };
+        resolve(db);
       };
-      
+
       request.onerror = () => {
         clearTimeout(timer);
         resolve(null);
@@ -394,6 +412,18 @@ const getIDB = (): Promise<IDBDatabase | null> => {
       resolve(null);
     }
   });
+};
+
+const getIDB = (): Promise<IDBDatabase | null> => {
+  if (!idbConnectionPromise) {
+    idbConnectionPromise = openIDB().then((db) => {
+      // Don't cache an outright failure (null) — let the next call retry a fresh open
+      // rather than being stuck returning null for the rest of the page's lifetime.
+      if (!db) idbConnectionPromise = null;
+      return db;
+    });
+  }
+  return idbConnectionPromise;
 };
 
 export const saveBooksToIDB = async (books: BookRecord[]): Promise<boolean> => {
@@ -433,29 +463,31 @@ export const saveVolumesToIDB = async (volumes: PassbookVolume[]): Promise<boole
     if (!db) return false;
     return new Promise((resolve) => {
       try {
-        const tx = db.transaction([VOLUMES_STORE, STORE_NAME], 'readwrite');
+        // NOTE: this transaction intentionally touches ONLY VOLUMES_STORE. An earlier
+        // version also wrote each archived book into STORE_NAME (the shared "current
+        // books" store used by loadBooksFromIDB) via `bookStore.put(b, \`book_${b.id}\`)`.
+        // Nothing ever reads an archived book back out of STORE_NAME by id — the archived
+        // volume's books are already fully embedded in the volume object below — so that
+        // write served no purpose except to silently re-plant every archived book back
+        // into "current books" on every single volumes save (any cloud sync, any backup
+        // restore), undoing archiveCurrentPassbook's cleanup and resurrecting a completed
+        // passbook's books into the active ledger. Do not add STORE_NAME writes back here.
+        const tx = db.transaction(VOLUMES_STORE, 'readwrite');
         const volStore = tx.objectStore(VOLUMES_STORE);
-        const bookStore = tx.objectStore(STORE_NAME);
 
         // Save full volumes array
         volStore.put(volumes, 'all_volumes');
 
-        // Also save each volume and its individual books
         volumes.forEach(vol => {
           if (vol && vol.id) {
             volStore.put(vol, `volume_${vol.id}`);
 
-            // If this is Volume 1, save a permanent independent snapshot in IDB
-            if (vol.volumeNumber === 1 || vol.id.includes('volume_1')) {
+            // If this is Volume 1, save a permanent independent snapshot in IDB.
+            // NOTE: id is `volume_<n>_<timestamp>`, so a loose `.includes('volume_1')` would
+            // also match volume 10, 11, 19, 100+, etc. and let a later volume silently
+            // overwrite Volume 1's permanent backup — match the numeric prefix exactly instead.
+            if (vol.volumeNumber === 1 || vol.id.startsWith('volume_1_')) {
               volStore.put(vol, 'permanent_vault_volume_1');
-            }
-
-            if (Array.isArray(vol.books)) {
-              vol.books.forEach(b => {
-                if (b && b.id) {
-                  bookStore.put(b, `book_${b.id}`);
-                }
-              });
             }
           }
         });
@@ -507,12 +539,25 @@ export const loadBooksFromIDB = async (): Promise<BookRecord[]> => {
           getAllReq.onsuccess = () => {
             const results = getAllReq.result || [];
             const map = new Map<string, BookRecord>();
+
+            // IDB's getAll() with no index returns records ordered by PRIMARY KEY, not by
+            // insertion time — i.e. by the lexicographic order of strings like
+            // 'book_<id>' and 'digital_reading_books'. A Map keeps a key at whatever
+            // position it was FIRST inserted at, so whichever of these two shapes happens
+            // to sort first ends up dictating the final order. Since 'book_' < 'digital_'
+            // lexicographically, the individual per-book entries were always winning here,
+            // silently discarding the deliberate (newest-first) order of the aggregate
+            // array on every single load — the ledger and the archived-volume numbering
+            // would then drift between "newest first" and "whatever order the IDs sort in"
+            // depending on when they were last touched. Seed the map from the aggregate
+            // array FIRST so its order always wins; individual entries then only fill in
+            // a book that (for whatever reason) exists solely as a standalone record.
+            const aggregate = results.find((item: any) => Array.isArray(item)) as BookRecord[] | undefined;
+            (aggregate || []).forEach((b) => {
+              if (b && b.id && typeof b.title === 'string') map.set(b.id, b);
+            });
             results.forEach((item: any) => {
-              if (Array.isArray(item)) {
-                item.forEach((b: any) => {
-                  if (b && b.id && typeof b.title === 'string') map.set(b.id, b);
-                });
-              } else if (item && typeof item === 'object' && item.id && typeof item.title === 'string') {
+              if (!Array.isArray(item) && item && typeof item === 'object' && item.id && typeof item.title === 'string' && !map.has(item.id)) {
                 map.set(item.id, item);
               }
             });
@@ -874,6 +919,15 @@ export const archiveCurrentPassbook = (
   safeStorage.setItem('digital_reading_books_meta', '[]');
   safeStorage.setItem('digital_reading_books_lean', '[]');
   saveBooksToIDB([]).catch(() => {});
+
+  // saveBooksToIDB([]) above only overwrites the aggregate 'digital_reading_books' blob —
+  // it does NOT touch the individual `book_<id>` entries IndexedDB has been accumulating
+  // one per deposit (saveBooksToIDB always writes both). Left behind, loadBooksFromIDB()'s
+  // getAll() would keep picking every one of those up forever and re-merging the entire
+  // just-archived volume back into "current books" on the very next load — exactly the
+  // "책 목록이 되살아나며 2호 통장 카운트가 꼬이는" failure. Delete them explicitly so the
+  // archived volume can only ever be found in `updatedVolumes` from here on.
+  currentBooks.forEach(b => { if (b && b.id) deleteBookFromIDB(b.id).catch(() => {}); });
 
   return { updatedVolumes, nextVolume };
 };

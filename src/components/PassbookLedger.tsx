@@ -80,8 +80,12 @@ export default function PassbookLedger({
     book.title.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  // Reversing to show newest reading on top (like a real savings transaction log)
-  const sortedBooks = [...filteredBooks].reverse();
+  // `books` already arrives newest-first (App.tsx prepends each new deposit to the front
+  // of the array), so no re-sort is needed to show the newest reading on top like a real
+  // savings transaction log. (Reversing here — as this used to do — would flip it to
+  // oldest-first, both contradicting the intent and disagreeing with the archived volume
+  // view, which lists the very same array without reversing it.)
+  const sortedBooks = filteredBooks;
 
   // Color mappings for stamp backgrounds in Natural Tones
   const stampColors = [

@@ -538,7 +538,7 @@ export default function WhiteboardModal({
                         </div>
                         
                         {/* Footer info */}
-                        <div className="flex justify-between items-center bg-stone-50 px-2.5 py-1.5 rounded-xl border border-stone-150">
+                        <div className="flex justify-between items-center bg-stone-50 px-2.5 py-1.5 rounded-xl border border-stone-200">
                           <span className="text-[11px] text-stone-500 font-sans">마음에 드는 색을 콕 짚어보세요!</span>
                           <button
                             type="button"
@@ -582,9 +582,9 @@ export default function WhiteboardModal({
                   <button
                     type="button"
                     onClick={handleUndo}
-                    disabled={history.length === 0}
+                    disabled={history.length <= 1}
                     className={`px-3 py-2 rounded-xl font-gaegu text-base font-bold flex items-center gap-1 transition-colors border shadow-xs ${
-                      history.length > 0
+                      history.length > 1
                         ? 'bg-white hover:bg-stone-50 border-stone-300 text-stone-700 cursor-pointer'
                         : 'bg-stone-50 border-stone-200 text-stone-300 cursor-not-allowed'
                     }`}
